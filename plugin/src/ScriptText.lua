@@ -134,13 +134,27 @@ local function EditHunk(document, old, new, hunk)
 	local count = hunk.d - hunk.c
 	local removed = hunk.b - hunk.a
 
-	if removed == 1 and count == 1 then
-		-- One line to one line: only the part inside it that changed.
-		local before, after = old[hunk.a], new[hunk.c]
-		local prefix = CommonPrefix(before, after)
-		local suffix = CommonSuffix(before, after, prefix)
-		local middle = string.sub(after, prefix + 1, #after - suffix)
-		return document:EditTextAsync(middle, hunk.a, Column(prefix), hunk.a, Column(#before - suffix))
+	if removed > 0 and count > 0 then
+		-- Lines replaced by lines: only the characters that differ, so a cursor before or after
+		-- them stays where it is. Replacing whole lines would move a cursor inside them to the end.
+		local before = table.concat(old, "\n", hunk.a, hunk.b - 1)
+		local prefix = CommonPrefix(before, replacement)
+		local suffix = CommonSuffix(before, replacement, prefix)
+		local middle = string.sub(replacement, prefix + 1, #replacement - suffix)
+		-- A byte offset into `before` as a line and column of the document.
+		local function Position(offset)
+			for line = hunk.a, hunk.b - 1 do
+				local length = #old[line]
+				if offset <= length or line == hunk.b - 1 then
+					return line, Column(offset)
+				end
+				offset -= length + 1
+			end
+			return hunk.b - 1, Column(offset)
+		end
+		local start_line, start_column = Position(prefix)
+		local end_line, end_column = Position(#before - suffix)
+		return document:EditTextAsync(middle, start_line, start_column, end_line, end_column)
 	elseif hunk.b <= #old then
 		-- Whole lines, with something after them.
 		local text = count > 0 and (replacement .. "\n") or ""
