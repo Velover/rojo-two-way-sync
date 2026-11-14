@@ -33,8 +33,11 @@ Making a new release? Simply add the new header with the version and date undern
 
 * `rojo serve` now also runs the twoway sync when a `twoway.json` sits beside the project: the Studio trees it lists sync both ways, and conflicts are reviewed at `/twoway/`. A mapping that overlaps a tree the project fills from files is refused.
 * The plugin starts the twoway sync with the same Connect when the server runs one. Its trees are kept the same both ways, open scripts are edited without moving the cursor, and the connected page shows what waits for review with a button that opens the review page.
+* Scripts open in an editor tab are now updated by editing only the lines that changed, so the cursor, selection and scroll stay where they were instead of jumping to the end of the file. ([#1273])
 * Removed the plugin's unstable "Two-Way Sync" setting and the Reject button it added to the confirm screen. Two-way sync now comes only from a project's `twoway.json`.
 * Fixed `rojo serve` crashing with "The system cannot find the path specified" when a file or folder is created and deleted again before Rojo reads it, such as the temporary folders a package manager makes in `node_modules`. Such a path is now handled as removed.
+
+[#1273]: https://github.com/rojo-rbx/rojo/issues/1273
 
 ## [7.7.1] (October 1st, 2026)
 
