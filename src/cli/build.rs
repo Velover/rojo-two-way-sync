@@ -163,36 +163,42 @@ fn write_model(
 ) -> anyhow::Result<()> {
     println!("Building project '{}'", session.project_name());
 
+    // The fork: a place build also gets the trees from a twoway.json beside the project.
+    let two_way = match output_kind {
+        OutputKind::Rbxl | OutputKind::Rbxlx => {
+            crate::twoway_sync::place_with_two_way_trees(session, output)?
+        }
+        OutputKind::Rbxm | OutputKind::Rbxmx => None,
+    };
     let tree = session.tree();
-    let root_id = tree.get_root_id();
+    let dom = two_way.as_ref().unwrap_or(tree.inner());
+    let root_id = dom.root_ref();
 
     log::trace!("Opening output file for write");
     let mut file = BufWriter::new(File::create(output)?);
 
     match output_kind {
         OutputKind::Rbxm => {
-            rbx_binary::to_writer(&mut file, tree.inner(), &[root_id])?;
+            rbx_binary::to_writer(&mut file, dom, &[root_id])?;
         }
         OutputKind::Rbxl => {
-            let root_instance = tree.get_instance(root_id).unwrap();
-            let top_level_ids = root_instance.children();
+            let top_level_ids = dom.root().children();
 
-            rbx_binary::to_writer(&mut file, tree.inner(), top_level_ids)?;
+            rbx_binary::to_writer(&mut file, dom, top_level_ids)?;
         }
         OutputKind::Rbxmx => {
             // Model files include the root instance of the tree and all its
             // descendants.
 
-            rbx_xml::to_writer(&mut file, tree.inner(), &[root_id], xml_encode_config())?;
+            rbx_xml::to_writer(&mut file, dom, &[root_id], xml_encode_config())?;
         }
         OutputKind::Rbxlx => {
             // Place files don't contain an entry for the DataModel, but our
             // WeakDom representation does.
 
-            let root_instance = tree.get_instance(root_id).unwrap();
-            let top_level_ids = root_instance.children();
+            let top_level_ids = dom.root().children();
 
-            rbx_xml::to_writer(&mut file, tree.inner(), top_level_ids, xml_encode_config())?;
+            rbx_xml::to_writer(&mut file, dom, top_level_ids, xml_encode_config())?;
         }
     }
 

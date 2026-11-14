@@ -1,4 +1,4 @@
-//! `twoway check`: compares the mapped folders with a saved place, without Studio, and says what a
+//! `rojo twoway check`: compares the mapped folders with a saved place, without Studio, and says what a
 //! first sync would do. Nothing is written.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -13,7 +13,8 @@ use crate::config::{Config, Mapping};
 use crate::modeldiff;
 use crate::modelfile;
 use crate::place_build::{
-    is_container, mappings_for_build, read_place, script_type_of, walk_place, Found,
+    is_container, mappings_for_place, place_file_name, read_place, script_type_of, walk_place,
+    Found,
 };
 use crate::tree::{
     canonical_meta, hash_bytes, is_group_key, normalize_text, parent_key, prune_folders, scan,
@@ -247,7 +248,7 @@ pub fn check(config_path: &Path, place_path: &Path, place_id: Option<u64>) -> Re
     let ignore = config.ignore_set()?;
     let mut report = Report::default();
 
-    let used: Vec<&Mapping> = mappings_for_build(&config, place_id, place_path);
+    let used: Vec<&Mapping> = mappings_for_place(&config, place_id, place_file_name(place_path));
     for mapping in &config.mappings {
         if !used.iter().any(|m| std::ptr::eq(*m, mapping)) {
             println!("skipped {}: it names another place", mapping.studio);

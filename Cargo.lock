@@ -2881,6 +2881,7 @@ dependencies = [
  "notify 8.2.2",
  "rbx_binary",
  "rbx_dom_weak",
+ "rbx_reflection",
  "rbx_reflection_database",
  "rbx_types",
  "rbx_xml",

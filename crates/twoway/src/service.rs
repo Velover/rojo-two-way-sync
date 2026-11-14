@@ -124,8 +124,16 @@ impl Service {
         page_url: String,
         open_browser: bool,
     ) -> Result<Arc<Self>> {
+        let engine = Engine::new(config, root)?;
+        let tidied = engine.tidy()?;
+        if tidied.blobs > 0 || tidied.history_lines > 0 {
+            println!(
+                "twoway: removed {} stored version(s) and {} history line(s) nothing needs any more",
+                tidied.blobs, tidied.history_lines
+            );
+        }
         Ok(Arc::new(Self {
-            engine: Mutex::new(Engine::new(config, root)?),
+            engine: Mutex::new(engine),
             wake: Notify::new(),
             page_url,
             open_browser,
@@ -186,6 +194,10 @@ impl Service {
             ("POST", ["api", "open-review"]) => {
                 open_in_browser(&self.page_url)?;
                 Reply::ok()
+            }
+            // For `rojo twoway conflicts`. Unlike `review`, this doesn't count as the page being open.
+            ("GET", ["api", "conflicts"]) => {
+                Reply::Json(200, json!({ "conflicts": self.engine().conflicts() }))
             }
             ("GET", ["api", "conflicts", id]) => self.conflict_detail(id.parse()?)?,
             ("POST", ["api", "conflicts", id, "resolve"]) => {
@@ -369,6 +381,7 @@ impl Service {
         } else {
             engine.resolve(id, &body.choice, body.text.as_deref(), seen)?;
         }
+        engine.store.remove_temp(&id.to_string());
         drop(engine);
         self.wake.notify_waiters();
         Ok(Reply::ok())

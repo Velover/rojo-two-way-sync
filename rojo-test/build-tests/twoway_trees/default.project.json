@@ -1,0 +1,12 @@
+{
+  "name": "twoway_trees",
+  "tree": {
+    "$className": "DataModel",
+    "ReplicatedStorage": {
+      "$className": "ReplicatedStorage",
+      "Rojo": {
+        "$path": "src"
+      }
+    }
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "mappings": [
+    { "studio": "ReplicatedStorage/GameData", "path": "synced" },
+    { "studio": "Workspace/Elsewhere", "path": "other", "placeName": "Other.rbxlx" }
+  ]
+}

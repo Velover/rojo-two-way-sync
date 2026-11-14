@@ -8,6 +8,7 @@ mod plugin;
 mod serve;
 mod sourcemap;
 mod syncback;
+mod twoway;
 mod upload;
 
 use std::{borrow::Cow, env, path::Path, str::FromStr};
@@ -24,6 +25,7 @@ pub use self::plugin::{PluginCommand, PluginSubcommand};
 pub use self::serve::ServeCommand;
 pub use self::sourcemap::SourcemapCommand;
 pub use self::syncback::SyncbackCommand;
+pub use self::twoway::{TwowayCommand, TwowaySubcommand};
 pub use self::upload::UploadCommand;
 
 /// Command line options that Rojo accepts, defined using the clap crate.
@@ -50,6 +52,7 @@ impl Options {
             Subcommand::Doc(subcommand) => subcommand.run(),
             Subcommand::Plugin(subcommand) => subcommand.run(),
             Subcommand::Syncback(subcommand) => subcommand.run(self.global),
+            Subcommand::Twoway(subcommand) => subcommand.run(),
         }
     }
 }
@@ -124,6 +127,8 @@ pub enum Subcommand {
     Doc(DocCommand),
     Plugin(PluginCommand),
     Syncback(SyncbackCommand),
+    /// Look after the two-way sync from a twoway.json beside the project (this fork).
+    Twoway(TwowayCommand),
 }
 
 pub(super) fn resolve_path(path: &Path) -> anyhow::Result<Cow<'_, Path>> {

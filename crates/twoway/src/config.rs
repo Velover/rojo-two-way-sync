@@ -14,7 +14,7 @@ pub struct Config {
     pub mappings: Vec<Mapping>,
     #[serde(default)]
     pub ignore: Vec<String>,
-    /// `port` and `autoConnect` were for `twoway serve` and its own plugin. Rojo serves the sync on
+    /// `port` and `autoConnect` were for the old standalone `twoway serve` and its plugin. Rojo serves the sync on
     /// its port and starts it with its Connect, so they're ignored, but still accepted so older
     /// files load.
     #[serde(default, rename = "port")]

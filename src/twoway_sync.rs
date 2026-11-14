@@ -5,17 +5,23 @@
 //! in both directions, and conflicts are reviewed on a web page at `/twoway/`. Without the file,
 //! nothing here runs and Rojo behaves as it always has.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
 use anyhow::{bail, Context};
+use rbx_dom_weak::{InstanceBuilder, WeakDom};
 use serde::{Deserialize, Serialize};
 use twoway::config::Config;
+use twoway::place_build::{self, BuildReport, RojoLayout};
 use twoway::service::Service;
 
-use crate::project::ProjectNode;
+use crate::project::{Project, ProjectNode};
+use crate::serve_session::ServeSession;
 
 pub const CONFIG_FILE: &str = "twoway.json";
+
+/// Set, `rojo serve` doesn't open the review page by itself when a conflict appears.
+pub const NO_OPEN_VAR: &str = "ROJO_TWOWAY_NO_OPEN";
 
 /// Where the sync is mounted on Rojo's server.
 pub const BASE: &str = "/twoway";
@@ -41,12 +47,12 @@ pub fn handles(path: &str) -> bool {
     path == BASE || path.starts_with(&format!("{BASE}/"))
 }
 
-/// Starts the sync if the project folder has a `twoway.json`.
-pub fn start_if_configured(
+/// The project's `twoway.json`, loaded, when its folder has one. Mappings that overlap trees Rojo
+/// fills from files are refused here, for every command alike.
+pub fn load_config(
     project_folder: &Path,
     tree: &ProjectNode,
-    port: u16,
-) -> anyhow::Result<Option<Arc<Service>>> {
+) -> anyhow::Result<Option<(Config, PathBuf)>> {
     let config_path = project_folder.join(CONFIG_FILE);
     if !config_path.is_file() {
         return Ok(None);
@@ -54,16 +60,98 @@ pub fn start_if_configured(
     let (config, root) = Config::load(&config_path)?;
     check_overlaps(tree, &config)
         .with_context(|| format!("{} can't be used", config_path.display()))?;
+    Ok(Some((config, root)))
+}
+
+/// Starts the sync if the project folder has a `twoway.json`.
+pub fn start_if_configured(
+    project_folder: &Path,
+    tree: &ProjectNode,
+    port: u16,
+) -> anyhow::Result<Option<Arc<Service>>> {
+    let Some((config, root)) = load_config(project_folder, tree)? else {
+        return Ok(None);
+    };
 
     let mappings = config.mappings.len();
     let page_url = format!("http://localhost:{port}{BASE}/");
-    let service = Service::new(config, root, page_url, true)?;
+    // Agents and tests serving a project set ROJO_TWOWAY_NO_OPEN, so nothing opens in the browser.
+    let open_browser = std::env::var_os(NO_OPEN_VAR).is_none();
+    let service = Service::new(config, root, page_url, open_browser)?;
     let _ = INFO.set(TwowayInfo {
         base: BASE.to_string(),
         version: env!("CARGO_PKG_VERSION").to_string(),
         mappings,
     });
     Ok(Some(service))
+}
+
+/// For `rojo build`: a copy of the place Rojo built with the two-way trees laid in, so one build
+/// makes a complete place. `None` when the project has no `twoway.json`.
+///
+/// Mappings that name no place go in, and those that name this one: by the project's `placeId`,
+/// or by the output's file name.
+pub fn place_with_two_way_trees(
+    session: &ServeSession,
+    output: &Path,
+) -> anyhow::Result<Option<WeakDom>> {
+    let project = session.root_project();
+    let Some((config, root)) = load_config(project.folder_location(), &project.tree)? else {
+        return Ok(None);
+    };
+
+    let mut dom = copy_place(session.tree().inner());
+    let mappings = place_build::mappings_for_place(
+        &config,
+        project.place_id,
+        place_build::place_file_name(output),
+    );
+    let mut report = BuildReport::default();
+    place_build::lay_mappings(&mut dom, &config, &root, &mappings, &mut report)?;
+    println!(
+        "Added {} two-way tree(s) from {CONFIG_FILE}: {} script(s), {} model file(s)",
+        mappings.len(),
+        report.scripts,
+        report.models
+    );
+    Ok(Some(dom))
+}
+
+/// A copy of a place, references between its instances kept.
+pub fn copy_place(source: &WeakDom) -> WeakDom {
+    let source_root = source.root();
+    let mut dom = WeakDom::new(
+        InstanceBuilder::new(source_root.class)
+            .with_name(source_root.name.as_str())
+            .with_properties(source_root.properties.clone()),
+    );
+    let children = source_root.children().to_vec();
+    let root = dom.root_ref();
+    for copy in source.clone_multiple_into_external(&children, &mut dom) {
+        dom.transfer_within(copy, root);
+    }
+    dom
+}
+
+/// Where a project puts things, for laying its trees over a saved place.
+pub fn rojo_layout(project: &Project) -> RojoLayout {
+    fn walk(node: &ProjectNode, path: Vec<String>, layout: &mut RojoLayout) {
+        if node.path.is_some() {
+            layout.trees.push(path);
+            return;
+        }
+        if !path.is_empty() && (!node.properties.is_empty() || !node.attributes.is_empty()) {
+            layout.properties.push(path.clone());
+        }
+        for (name, child) in &node.children {
+            let mut child_path = path.clone();
+            child_path.push(name.clone());
+            walk(child, child_path, layout);
+        }
+    }
+    let mut layout = RojoLayout::default();
+    walk(&project.tree, Vec::new(), &mut layout);
+    layout
 }
 
 fn is_within(path: &str, ancestor: &str) -> bool {

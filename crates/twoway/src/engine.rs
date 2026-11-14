@@ -5,11 +5,11 @@
 //! event, any number of times. Nothing depends on timing: our own writes come back as "both sides
 //! match", which needs no action.
 
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, bail, Context, Result};
 use globset::GlobSet;
@@ -38,6 +38,21 @@ struct State {
 }
 
 const PAST_VERSIONS_KEPT: usize = 100;
+
+/// History lines kept when the server starts. Older ones, and the versions only they mention, go.
+const HISTORY_KEPT: usize = 5000;
+
+/// A stored version this new may belong to a server that's still running on the same folder
+/// (another port), so cleaning leaves it.
+const UNUSED_BLOB_GRACE: Duration = Duration::from_secs(60 * 60);
+
+/// What [`Engine::tidy`] removed.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Tidied {
+    pub blobs: usize,
+    pub history_lines: usize,
+    pub temp: bool,
+}
 
 impl State {
     fn remember_base(&mut self, mapping: &str) {
@@ -120,21 +135,113 @@ impl Store {
     }
 
     pub fn history(&self, limit: usize) -> Vec<HistoryEntry> {
-        let text = fs::read_to_string(self.dir.join("history.jsonl")).unwrap_or_default();
-        let mut entries: Vec<HistoryEntry> = text
-            .lines()
-            .rev()
-            .take(limit)
-            .filter_map(|l| serde_json::from_str(l).ok())
-            .collect();
-        entries.reverse();
-        entries
+        read_history(&self.dir, limit)
     }
 
+    /// Files for one conflict's VS Code diff or merge, in `.twoway/tmp/<name>`.
     pub fn temp_dir(&self, name: &str) -> Result<PathBuf> {
         let dir = self.dir.join("tmp").join(name);
         fs::create_dir_all(&dir)?;
         Ok(dir)
+    }
+
+    /// Drops a conflict's diff and merge files once it's settled.
+    pub fn remove_temp(&self, name: &str) {
+        let _ = fs::remove_dir_all(self.dir.join("tmp").join(name));
+    }
+
+    /// The full hash of a stored version from the start of it, as `rojo twoway history` prints.
+    pub fn find(&self, prefix: &str) -> Result<String> {
+        find_blob(&self.dir, prefix)
+    }
+
+    /// Removes what nothing needs any more: the diff and merge files of earlier runs (conflict
+    /// numbers start over, so they'd be mistaken for new ones), history past [`HISTORY_KEPT`]
+    /// lines, and stored versions that neither `keep` nor the kept history mention.
+    fn tidy(&self, keep: &mut HashSet<String>) -> Result<Tidied> {
+        let mut tidied = Tidied::default();
+
+        let temp = self.dir.join("tmp");
+        if temp.exists() {
+            fs::remove_dir_all(&temp)
+                .with_context(|| format!("couldn't clear {}", temp.display()))?;
+            tidied.temp = true;
+        }
+
+        let history_path = self.dir.join("history.jsonl");
+        let text = fs::read_to_string(&history_path).unwrap_or_default();
+        let lines: Vec<&str> = text.lines().collect();
+        let kept = &lines[lines.len().saturating_sub(HISTORY_KEPT)..];
+        if kept.len() < lines.len() {
+            let temp_history = self.dir.join("history.jsonl.tmp");
+            fs::write(
+                &temp_history,
+                kept.join(
+                    "
+",
+                ) + "
+",
+            )?;
+            fs::rename(&temp_history, &history_path)?;
+            tidied.history_lines = lines.len() - kept.len();
+        }
+        for line in kept {
+            if let Ok(entry) = serde_json::from_str::<HistoryEntry>(line) {
+                keep.extend(entry.from);
+                keep.extend(entry.to);
+            }
+        }
+
+        let now = SystemTime::now();
+        for entry in fs::read_dir(self.dir.join("blobs"))?.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if keep.contains(&name) {
+                continue;
+            }
+            let recent = entry
+                .metadata()
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|modified| now.duration_since(modified).ok())
+                .is_none_or(|age| age < UNUSED_BLOB_GRACE);
+            if !recent && fs::remove_file(entry.path()).is_ok() {
+                tidied.blobs += 1;
+            }
+        }
+        Ok(tidied)
+    }
+}
+
+/// The last `limit` history entries in a `.twoway` folder, oldest first. Reads without creating
+/// anything, for commands that only look.
+pub fn read_history(dir: &Path, limit: usize) -> Vec<HistoryEntry> {
+    let text = fs::read_to_string(dir.join("history.jsonl")).unwrap_or_default();
+    let mut entries: Vec<HistoryEntry> = text
+        .lines()
+        .rev()
+        .take(limit)
+        .filter_map(|l| serde_json::from_str(l).ok())
+        .collect();
+    entries.reverse();
+    entries
+}
+
+/// The full hash of a stored version in a `.twoway` folder from the start of it.
+pub fn find_blob(dir: &Path, prefix: &str) -> Result<String> {
+    if prefix.len() < 6 || !prefix.chars().all(|c| c.is_ascii_hexdigit()) {
+        bail!("a version is at least 6 hex digits, as `rojo twoway history` prints them");
+    }
+    let mut found = fs::read_dir(dir.join("blobs"))
+        .with_context(|| format!("no stored versions in {}", dir.display()))?
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|name| name.starts_with(prefix));
+    match (found.next(), found.next()) {
+        (Some(hash), None) => Ok(hash),
+        (None, _) => bail!("no stored version starts with {prefix}"),
+        (Some(_), Some(_)) => {
+            bail!("more than one stored version starts with {prefix}; give more of it")
+        }
     }
 }
 
@@ -324,6 +431,19 @@ impl Engine {
             next_id: 1,
             warnings: Vec::new(),
         })
+    }
+
+    /// Cleans `.twoway/` before a server starts using it (see [`Store::tidy`]), keeping every
+    /// version the agreed state still names.
+    pub fn tidy(&self) -> Result<Tidied> {
+        let mut keep = HashSet::new();
+        for tree in self.state.bases.values() {
+            keep.extend(tree.values().filter_map(|item| item.hash.clone()));
+        }
+        for keys in self.state.past.values() {
+            keep.extend(keys.values().flatten().cloned());
+        }
+        self.store.tidy(&mut keep)
     }
 
     fn take_id(&mut self) -> u64 {
@@ -2299,5 +2419,73 @@ mod tests {
         assert_eq!(history.len(), 1);
         assert_eq!(history[0].direction, "toDisk");
         assert_eq!(history[0].key, "A");
+    }
+
+    #[test]
+    fn tidy_removes_only_what_nothing_needs() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path()).unwrap();
+        let agreed = store.put(b"agreed").unwrap();
+        let in_history = store.put(b"in the kept history").unwrap();
+        let in_old_history = store.put(b"only in history that's dropped").unwrap();
+        let unused = store.put(b"unused").unwrap();
+        let fresh = store.put(b"fresh").unwrap();
+        let long_ago = SystemTime::now() - Duration::from_secs(2 * 60 * 60);
+        for hash in [&agreed, &in_history, &in_old_history, &unused] {
+            fs::File::options()
+                .write(true)
+                .open(store.dir.join("blobs").join(hash))
+                .unwrap()
+                .set_modified(long_ago)
+                .unwrap();
+        }
+        let entry = |to: &str| {
+            serde_json::to_string(&HistoryEntry {
+                at: 0,
+                mapping: "m".into(),
+                key: "k".into(),
+                direction: "toDisk".into(),
+                change: "update".into(),
+                from: None,
+                to: Some(to.into()),
+            })
+            .unwrap()
+        };
+        let mut lines = vec![entry(&in_old_history)];
+        lines.extend((1..HISTORY_KEPT).map(|_| entry("0")));
+        lines.push(entry(&in_history));
+        fs::write(store.dir.join("history.jsonl"), lines.join("\n") + "\n").unwrap();
+        fs::write(
+            store.temp_dir("1").unwrap().join("merged.luau"),
+            "old merge",
+        )
+        .unwrap();
+
+        let tidied = store.tidy(&mut HashSet::from([agreed.clone()])).unwrap();
+
+        assert_eq!(
+            tidied,
+            Tidied {
+                blobs: 2,
+                history_lines: 1,
+                temp: true
+            }
+        );
+        let exists = |hash: &str| store.dir.join("blobs").join(hash).exists();
+        assert!(exists(&agreed) && exists(&in_history), "still named");
+        assert!(exists(&fresh), "too new to be sure");
+        assert!(!exists(&in_old_history) && !exists(&unused));
+        assert!(!store.dir.join("tmp").exists());
+        assert_eq!(store.history(usize::MAX).len(), HISTORY_KEPT);
+    }
+
+    #[test]
+    fn a_version_is_found_from_its_start() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path()).unwrap();
+        let hash = store.put(b"text").unwrap();
+        assert_eq!(store.find(&hash[..8]).unwrap(), hash);
+        assert!(store.find("abc").is_err(), "too short");
+        assert!(store.find("ffffffffff").is_err() || hash.starts_with("ffffffffff"));
     }
 }

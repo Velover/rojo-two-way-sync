@@ -1,8 +1,8 @@
-//! `twoway build`: applies the current files to a copy of a place, offline.
+//! Builds places with the mapped files in them, offline.
 //!
-//! `rojo build` only makes a place from its project tree. This starts from a saved place instead,
-//! so the map and everything else in it stay, and lays the mapped files over it. With `--rojo`, the
-//! project's own trees are laid over it first.
+//! `rojo build` lays the mapped trees into the place it builds from the project. `rojo twoway
+//! build` starts from a saved place instead, so the map and everything else in it stay, and lays
+//! the project's trees and then the mapped files over it.
 //!
 //! The rule is the same as for live sync: scripts and folders follow the files, listed models are
 //! replaced, and anything else in the place is left exactly as it is.
@@ -11,7 +11,6 @@ use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::{BufReader, BufWriter};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use anyhow::{anyhow, bail, Context, Result};
 use rbx_dom_weak::types::{Attributes, Enum, Ref, Tags, Variant};
@@ -26,10 +25,9 @@ use crate::tree::{
 };
 
 pub struct BuildOptions {
-    pub config: Option<PathBuf>,
+    pub config: PathBuf,
     pub base: PathBuf,
     pub output: PathBuf,
-    pub rojo: Option<PathBuf>,
     pub place_id: Option<u64>,
 }
 
@@ -44,16 +42,57 @@ pub struct BuildReport {
     pub kept: Vec<String>,
 }
 
-pub(crate) fn read_place(path: &Path) -> Result<WeakDom> {
-    let file = File::open(path).with_context(|| format!("could not open {}", path.display()))?;
-    rbx_binary::from_reader(BufReader::new(file))
-        .with_context(|| format!("could not read {}", path.display()))
+fn is_xml(path: &Path) -> bool {
+    path.extension().and_then(|e| e.to_str()) == Some("rbxlx")
 }
 
-fn write_place(path: &Path, dom: &WeakDom) -> Result<()> {
-    let file = File::create(path).with_context(|| format!("could not write {}", path.display()))?;
-    rbx_binary::to_writer(BufWriter::new(file), dom, dom.root().children())?;
-    Ok(())
+/// Reads a place file, binary (`.rbxl`) or XML (`.rbxlx`).
+pub fn read_place(path: &Path) -> Result<WeakDom> {
+    let file = File::open(path).with_context(|| format!("could not open {}", path.display()))?;
+    let reader = BufReader::new(file);
+    if is_xml(path) {
+        rbx_xml::from_reader_default(reader)
+            .with_context(|| format!("could not read {}", path.display()))
+    } else {
+        rbx_binary::from_reader(reader)
+            .with_context(|| format!("could not read {}", path.display()))
+    }
+}
+
+/// Writes a place file, binary or XML by its extension. It goes to a temporary name first, so a
+/// failed write never leaves a half-written place, nor the temporary file.
+pub fn write_place(path: &Path, dom: &WeakDom) -> Result<()> {
+    let mut temp = path.as_os_str().to_owned();
+    temp.push(".tmp");
+    let temp = PathBuf::from(temp);
+    let written = (|| -> Result<()> {
+        let file =
+            File::create(&temp).with_context(|| format!("could not write {}", temp.display()))?;
+        let mut writer = BufWriter::new(file);
+        if is_xml(path) {
+            rbx_xml::to_writer_default(&mut writer, dom, dom.root().children())?;
+        } else {
+            rbx_binary::to_writer(&mut writer, dom, dom.root().children())?;
+        }
+        std::io::Write::flush(&mut writer)?;
+        drop(writer);
+        std::fs::rename(&temp, path)
+            .with_context(|| format!("could not write {}", path.display()))?;
+        Ok(())
+    })();
+    if written.is_err() {
+        let _ = std::fs::remove_file(&temp);
+    }
+    written
+}
+
+/// Containers a service always has, made with their own class when a mapping needs one that the
+/// place is missing: `StarterPlayer/StarterPlayerScripts`, not a Folder of that name.
+fn is_fixed_container(name: &str) -> bool {
+    rbx_reflection_database::get()
+        .ok()
+        .and_then(|database| database.classes.get(name))
+        .is_some_and(|class| class.tags.contains(&rbx_reflection::ClassTag::NotCreatable))
 }
 
 fn child_named(dom: &WeakDom, parent: Ref, name: &str) -> Option<Ref> {
@@ -73,14 +112,19 @@ fn find_path(dom: &WeakDom, path: &[&str]) -> Option<Ref> {
     Some(current)
 }
 
-/// Finds an instance path, making what's missing. A service at the top is made with its own class.
+/// Finds an instance path, making what's missing. A service at the top is made with its own class,
+/// and so is a container a service always has (see [`is_fixed_container`]).
 fn ensure_path(dom: &mut WeakDom, path: &[&str]) -> Ref {
     let mut current = dom.root_ref();
     for (index, segment) in path.iter().enumerate() {
         current = match child_named(dom, current, segment) {
             Some(child) => child,
             None => {
-                let class = if index == 0 { *segment } else { "Folder" };
+                let class = if index == 0 || (index == 1 && is_fixed_container(segment)) {
+                    *segment
+                } else {
+                    "Folder"
+                };
                 dom.insert(current, InstanceBuilder::new(class).with_name(*segment))
             }
         };
@@ -514,60 +558,25 @@ fn apply_mapping(
     Ok(())
 }
 
-/// The instance paths in a Rojo project that come from files, and the nodes that set properties.
-fn project_nodes(
-    node: &Value,
-    path: Vec<String>,
-    trees: &mut Vec<Vec<String>>,
-    properties: &mut Vec<Vec<String>>,
-) {
-    let Some(object) = node.as_object() else {
-        return;
-    };
-    if object.contains_key("$path") {
-        trees.push(path);
-        return;
-    }
-    if object.contains_key("$properties") {
-        properties.push(path.clone());
-    }
-    for (name, child) in object {
-        if !name.starts_with('$') {
-            let mut child_path = path.clone();
-            child_path.push(name.clone());
-            project_nodes(child, child_path, trees, properties);
-        }
-    }
+/// Where a Rojo project puts things: the instance paths it fills from files (`$path`), and the
+/// nodes that set properties or attributes on an instance that's already there.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct RojoLayout {
+    pub trees: Vec<Vec<String>>,
+    pub properties: Vec<Vec<String>>,
 }
 
-fn apply_rojo(dom: &mut WeakDom, project: &Path, report: &mut BuildReport) -> Result<()> {
-    let text = std::fs::read_to_string(project)
-        .with_context(|| format!("could not read {}", project.display()))?;
-    let value: Value = serde_json::from_str(&text)
-        .with_context(|| format!("{} is not valid JSON", project.display()))?;
-
-    let temp_dir = std::env::temp_dir().join(format!("twoway-{}", std::process::id()));
-    std::fs::create_dir_all(&temp_dir)?;
-    let built_path = temp_dir.join("rojo.rbxl");
-    let status = Command::new("rojo")
-        .arg("build")
-        .arg(project)
-        .arg("-o")
-        .arg(&built_path)
-        .status()
-        .context("could not run rojo; is it on the PATH?")?;
-    if !status.success() {
-        bail!("rojo build failed");
-    }
-    let mut built = read_place(&built_path)?;
-    let _ = std::fs::remove_dir_all(&temp_dir);
-
-    let (mut trees, mut properties) = (Vec::new(), Vec::new());
-    project_nodes(&value["tree"], Vec::new(), &mut trees, &mut properties);
-
-    for path in properties {
+/// Lays the trees Rojo built over a place: each `$path` tree replaces what the place has there,
+/// and nodes that set properties copy them onto the place's instance.
+pub fn lay_rojo(
+    dom: &mut WeakDom,
+    built: &mut WeakDom,
+    layout: &RojoLayout,
+    report: &mut BuildReport,
+) -> Result<()> {
+    for path in &layout.properties {
         let names: Vec<&str> = path.iter().map(String::as_str).collect();
-        let Some(from) = find_path(&built, &names) else {
+        let Some(from) = find_path(built, &names) else {
             continue;
         };
         let target = ensure_path(dom, &names);
@@ -580,15 +589,15 @@ fn apply_rojo(dom: &mut WeakDom, project: &Path, report: &mut BuildReport) -> Re
         }
     }
 
-    for path in trees {
+    for path in &layout.trees {
         let names: Vec<&str> = path.iter().map(String::as_str).collect();
-        let Some(new) = find_path(&built, &names) else {
+        let Some(new) = find_path(built, &names) else {
             eprintln!("warning: rojo built nothing at {}", path.join("/"));
             continue;
         };
         match find_path(dom, &names) {
             Some(old) => {
-                replace_subtree(dom, old, &mut built, new, report)?;
+                replace_subtree(dom, old, built, new, report)?;
             }
             None => {
                 let parent = ensure_path(dom, &names[..names.len() - 1]);
@@ -600,13 +609,27 @@ fn apply_rojo(dom: &mut WeakDom, project: &Path, report: &mut BuildReport) -> Re
     Ok(())
 }
 
-/// Which mappings go into this place: those that name no place, and those that name this one.
-pub(crate) fn mappings_for_build<'a>(
+/// Lays the mapped folders' files over a place, as the live sync would.
+pub fn lay_mappings(
+    dom: &mut WeakDom,
+    config: &Config,
+    root: &Path,
+    mappings: &[&Mapping],
+    report: &mut BuildReport,
+) -> Result<()> {
+    for mapping in mappings {
+        apply_mapping(dom, root, mapping, config, report)?;
+    }
+    Ok(())
+}
+
+/// Which mappings go into a place: those that name no place, and those that name this one, by
+/// id or by its file name.
+pub fn mappings_for_place<'a>(
     config: &'a Config,
     place_id: Option<u64>,
-    base: &Path,
+    file_name: &str,
 ) -> Vec<&'a Mapping> {
-    let file_name = base.file_name().and_then(|n| n.to_str()).unwrap_or("");
     config
         .mappings
         .iter()
@@ -618,25 +641,20 @@ pub(crate) fn mappings_for_build<'a>(
         .collect()
 }
 
+/// The file name a place is known by, for mappings that name their place that way.
+pub fn place_file_name(path: &Path) -> &str {
+    path.file_name().and_then(|n| n.to_str()).unwrap_or("")
+}
+
+/// Lays the files over a copy of a saved place. `rojo twoway build` adds the project's own trees
+/// with [`lay_rojo`] in between.
 pub fn build_place(options: &BuildOptions) -> Result<BuildReport> {
     let mut report = BuildReport::default();
     let mut dom = read_place(&options.base)?;
-
-    if let Some(project) = &options.rojo {
-        apply_rojo(&mut dom, project, &mut report)?;
-    }
-    if let Some(config_path) = &options.config {
-        let (config, root) = Config::load(config_path)?;
-        let mappings = mappings_for_build(&config, options.place_id, &options.base);
-        for mapping in mappings {
-            apply_mapping(&mut dom, &root, mapping, &config, &mut report)?;
-        }
-    }
-
-    // A temporary name, so a failed write never leaves a half-written place.
-    let temp = options.output.with_extension("rbxl.tmp");
-    write_place(&temp, &dom)?;
-    std::fs::rename(&temp, &options.output)?;
+    let (config, root) = Config::load(&options.config)?;
+    let mappings = mappings_for_place(&config, options.place_id, place_file_name(&options.base));
+    lay_mappings(&mut dom, &config, &root, &mappings, &mut report)?;
+    write_place(&options.output, &dom)?;
     Ok(report)
 }
 
@@ -731,10 +749,9 @@ mod tests {
         .unwrap();
         write_place(&root.join("base.rbxl"), &place()).unwrap();
         let options = BuildOptions {
-            config: Some(root.join("twoway.json")),
+            config: root.join("twoway.json"),
             base: root.join("base.rbxl"),
             output: root.join("out.rbxl"),
-            rojo: None,
             place_id: None,
         };
         (dir, options)
@@ -797,10 +814,9 @@ mod tests {
         .unwrap();
         write_place(&root.join("base.rbxl"), &place()).unwrap();
         let options = BuildOptions {
-            config: Some(root.join("twoway.json")),
+            config: root.join("twoway.json"),
             base: root.join("base.rbxl"),
             output: root.join("out.rbxl"),
-            rojo: None,
             place_id: None,
         };
         build_place(&options).unwrap();
@@ -949,23 +965,69 @@ mod tests {
     }
 
     #[test]
-    fn project_nodes_finds_file_trees_and_properties() {
-        let tree: Value = serde_json::from_str(
-            r#"{ "$className": "DataModel",
-                 "ServerScriptService": { "TS": { "$path": "out/server" } },
-                 "ReplicatedStorage": { "rbxts_include": { "$path": "include", "node_modules": { "$className": "Folder" } } },
-                 "HttpService": { "$properties": { "HttpEnabled": true } } }"#,
+    fn mappings_go_into_an_empty_place_with_the_right_containers() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join("chars")).unwrap();
+        fs::write(root.join("chars/Sounds.client.luau"), "-- sounds").unwrap();
+        fs::write(
+            root.join("twoway.json"),
+            r#"{ "mappings": [ { "studio": "StarterPlayer/StarterCharacterScripts/Sounds", "path": "chars" } ] }"#,
         )
         .unwrap();
-        let (mut trees, mut properties) = (Vec::new(), Vec::new());
-        project_nodes(&tree, Vec::new(), &mut trees, &mut properties);
+        let (config, root) = Config::load(&root.join("twoway.json")).unwrap();
+        let mut dom = WeakDom::new(InstanceBuilder::new("DataModel"));
+        let mut report = BuildReport::default();
+        let mappings = mappings_for_place(&config, None, "x.rbxl");
+        lay_mappings(&mut dom, &config, &root, &mappings, &mut report).unwrap();
+
+        let found = census(&dom);
+        assert_eq!(found["StarterPlayer"], "StarterPlayer");
         assert_eq!(
-            trees,
-            [
-                vec!["ReplicatedStorage", "rbxts_include"],
-                vec!["ServerScriptService", "TS"]
-            ]
+            found["StarterPlayer/StarterCharacterScripts"],
+            "StarterCharacterScripts"
         );
-        assert_eq!(properties, [vec!["HttpService"]]);
+        assert_eq!(
+            found["StarterPlayer/StarterCharacterScripts/Sounds"],
+            "Folder"
+        );
+        assert_eq!(
+            found["StarterPlayer/StarterCharacterScripts/Sounds/Sounds"],
+            "LocalScript"
+        );
+    }
+
+    #[test]
+    fn rojo_trees_replace_what_the_place_has_there() {
+        let mut dom = place();
+        let mut built = WeakDom::new(InstanceBuilder::new("DataModel"));
+        let storage = built.insert(
+            built.root_ref(),
+            InstanceBuilder::new("ReplicatedStorage").with_name("ReplicatedStorage"),
+        );
+        let ts = built.insert(storage, InstanceBuilder::new("Folder").with_name("TS"));
+        built.insert(ts, InstanceBuilder::new("ModuleScript").with_name("Shared"));
+        let layout = RojoLayout {
+            trees: vec![vec!["ReplicatedStorage".into(), "TS".into()]],
+            properties: Vec::new(),
+        };
+        let mut report = BuildReport::default();
+        lay_rojo(&mut dom, &mut built, &layout, &mut report).unwrap();
+
+        let found = census(&dom);
+        assert_eq!(found["ReplicatedStorage/TS/Shared"], "ModuleScript");
+        assert!(
+            found.contains_key("ReplicatedStorage/Kit/Old"),
+            "the rest stays"
+        );
+        assert_eq!(report.rojo_trees, 1);
+    }
+
+    #[test]
+    fn a_failed_write_leaves_no_temporary_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let output = dir.path().join("missing").join("out.rbxl");
+        assert!(write_place(&output, &place()).is_err());
+        assert!(!dir.path().join("missing").exists());
     }
 }
