@@ -2,7 +2,7 @@ use crossbeam_channel::{select, Receiver, RecvError, Sender};
 use jod_thread::JoinHandle;
 use memofs::{IoResultExt, Vfs, VfsEvent};
 use rbx_dom_weak::types::{Ref, Variant};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::{
     fs,
     sync::{Arc, Mutex},
@@ -157,6 +157,27 @@ impl JobThreadContext {
         applied_patches
     }
 
+    /// The canonical form of a path that no longer exists: its nearest ancestor that still
+    /// does, canonicalized, with the rest of the path added back. A whole folder can disappear
+    /// at once, so the parent may be gone too.
+    fn canonicalize_removed(&self, path: &Path) -> PathBuf {
+        let mut missing = Vec::new();
+        let mut current = path;
+        loop {
+            if let Ok(mut found) = self.vfs.canonicalize(current) {
+                found.extend(missing.iter().rev());
+                return found;
+            }
+            match (current.parent(), current.file_name()) {
+                (Some(parent), Some(name)) => {
+                    missing.push(name.to_owned());
+                    current = parent;
+                }
+                _ => return path.to_path_buf(),
+            }
+        }
+    }
+
     fn handle_vfs_event(&self, event: VfsEvent) {
         log::trace!("Vfs event: {:?}", event);
 
@@ -168,17 +189,19 @@ impl JobThreadContext {
         // For a given VFS event, we might have many changes to different parts
         // of the tree. Calculate and apply all of these changes.
         let applied_patches = match event {
-            VfsEvent::Create(path) | VfsEvent::Write(path) => {
-                self.apply_patches(self.vfs.canonicalize(&path).unwrap())
-            }
-            VfsEvent::Remove(path) => {
-                // MemoFS does not track parent removals yet, so we can canonicalize
-                // the parent path safely and then append the removed path's file name.
-                let parent = path.parent().unwrap();
-                let file_name = path.file_name().unwrap();
-                let parent_normalized = self.vfs.canonicalize(parent).unwrap();
-                self.apply_patches(parent_normalized.join(file_name))
-            }
+            VfsEvent::Create(path) | VfsEvent::Write(path) => match self.vfs.canonicalize(&path) {
+                Ok(path) => self.apply_patches(path),
+                // Gone again before we got to it, like the temporary folders package
+                // managers make and delete in a moment: that's a removal.
+                Err(error) => {
+                    log::debug!(
+                        "{} vanished before it could be read: {error}",
+                        path.display()
+                    );
+                    self.apply_patches(self.canonicalize_removed(&path))
+                }
+            },
+            VfsEvent::Remove(path) => self.apply_patches(self.canonicalize_removed(&path)),
             _ => {
                 log::warn!("Unhandled VFS event: {:?}", event);
                 Vec::new()

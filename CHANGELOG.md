@@ -31,6 +31,8 @@ Making a new release? Simply add the new header with the version and date undern
 
 ## Unreleased
 
+* Fixed `rojo serve` crashing with "The system cannot find the path specified" when a file or folder is created and deleted again before Rojo reads it, such as the temporary folders a package manager makes in `node_modules`. Such a path is now handled as removed.
+
 ## [7.7.1] (October 1st, 2026)
 
 * Fixed `$path` values that point outside the project folder failing to match `syncRule`s on Windows, which broke `rojo sourcemap` with a "could not be turned into a Roblox Instance" error. ([#1290])
