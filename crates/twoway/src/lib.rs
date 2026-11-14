@@ -10,5 +10,6 @@ pub mod engine;
 pub mod modeldiff;
 pub mod modelfile;
 pub mod place_build;
+pub mod push;
 pub mod service;
 pub mod tree;

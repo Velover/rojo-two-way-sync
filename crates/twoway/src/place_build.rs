@@ -563,26 +563,41 @@ fn apply_mapping(
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct RojoLayout {
     pub trees: Vec<Vec<String>>,
-    pub properties: Vec<Vec<String>>,
+    pub properties: Vec<PropertyNode>,
+}
+
+/// A project node that sets properties on an instance that's already there.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct PropertyNode {
+    pub path: Vec<String>,
+    /// The properties it names, with `Attributes` when it sets attributes. Rojo's built instance
+    /// has others it fills in itself, which aren't the project's to change.
+    pub names: Vec<String>,
 }
 
 /// Lays the trees Rojo built over a place: each `$path` tree replaces what the place has there,
-/// and nodes that set properties copy them onto the place's instance.
+/// and nodes that set properties copy those onto the place's instance.
 pub fn lay_rojo(
     dom: &mut WeakDom,
     built: &mut WeakDom,
     layout: &RojoLayout,
     report: &mut BuildReport,
 ) -> Result<()> {
-    for path in &layout.properties {
-        let names: Vec<&str> = path.iter().map(String::as_str).collect();
+    for node in &layout.properties {
+        let names: Vec<&str> = node.path.iter().map(String::as_str).collect();
         let Some(from) = find_path(built, &names) else {
             continue;
         };
         let target = ensure_path(dom, &names);
-        let copied = built
+        let copied: Vec<_> = built
             .get_by_ref(from)
-            .map(|i| i.properties.clone())
+            .map(|i| {
+                i.properties
+                    .iter()
+                    .filter(|(name, _)| node.names.iter().any(|n| n == name.as_str()))
+                    .map(|(name, value)| (*name, value.clone()))
+                    .collect()
+            })
             .unwrap_or_default();
         if let Some(instance) = dom.get_by_ref_mut(target) {
             instance.properties.extend(copied);

@@ -14,7 +14,9 @@ the fork behaves like stock Rojo.
   `rojo twoway`.
 
 This crate is the engine. Rojo's `src/twoway_sync.rs` mounts it on the server, `src/cli/twoway.rs`
-adds the commands, and `plugin/src/TwoWay.lua` is the Studio side.
+and `src/cli/studio.rs` add the commands, `plugin/src/TwoWayStudio.lua` does the work in Studio
+(for the plugin, and for `rojo studio push` over MCP through `src/studio/`), and
+`plugin/src/TwoWay.lua` is the plugin's live session.
 
 ## Setup
 
@@ -94,6 +96,43 @@ rojo twoway restore 8092293e32 StudioSynced/GameData/Diving.luau
   printed.
 - `history` and `restore` read `.twoway/` and work without a server. `restore` writes a stored
   version back to a file in a mapped folder; a running sync sends it to Studio like any edit.
+
+## Pushing into a Studio without connecting
+
+`rojo studio push` writes the project into an open Studio once, through Studio's MCP server, with
+no `rojo serve` and no Connect: Rojo's trees and the trees from `twoway.json`. It suits agents,
+test windows, and a place someone else has open.
+
+```sh
+rojo studio list                                   # the open windows: id, place, file
+rojo studio push --studio "Dive In"                # Rojo's trees and the two-way ones
+rojo studio push --studio test.rbxl --only rojo    # or --only twoway
+rojo studio push --studio test.rbxl --dry-run      # what would change; changes nothing
+rojo studio push --studio test.rbxl --resolve "ReplicatedStorage/Data/Config=disk"
+rojo studio push --studio test.rbxl --resolve-all studio
+```
+
+- `--studio` takes the window's id, its name, the place's name or id, or a unique part of its name.
+  It's needed when more than one Studio is open.
+- **Rojo's trees** are made to match what Rojo builds, as a Connect would: scripts and Folders are
+  updated in place (an open script keeps its cursor), other instances are replaced when they
+  differ, and instances Rojo doesn't know are removed, except where the project keeps unknown
+  instances. Properties and attributes project nodes set (`$properties`, `$attributes`) are set too.
+- **The two-way trees** follow the files where Studio is only behind: Studio holds the agreed
+  version, or one agreed on before (a place closed without saving, or a test window opened from an
+  old place file), or doesn't have the item yet. Where Studio holds something the sync has never
+  seen, it may be someone's work: that item is a **conflict**, reported with a diff for scripts and
+  left alone. `--resolve PATH=disk` sends the file anyway, `PATH=studio` keeps Studio's, and
+  `--resolve-all` does one of them for every conflict. Instances only Studio ever had are left
+  alone, and an item deleted on disk is a conflict with `disk` suggested.
+- A push never writes the files or `.twoway/`. The agreed state belongs to `rojo serve`'s live
+  sync, and a push may go to any Studio.
+- Output is JSON, or text with `--text`. The exit code is 2 when conflicts were left alone.
+- Each call into Studio is one undo step. Calls take turns with other tools through a lock in the
+  OS temp folder (`roblox-studio-queue/exec`), the same one Orchid's Studio tools use, so a push
+  never runs at the same moment as another tool's Luau.
+- Only one Studio syncs both ways with `rojo serve` at a time: the latest to connect takes it over,
+  and the other's Rojo page says so.
 
 ## Building places
 

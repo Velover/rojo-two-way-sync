@@ -195,6 +195,99 @@ fn compare(studio: &WeakDom, a: Ref, disk: &WeakDom, b: Ref) -> Option<Node> {
     })
 }
 
+/// A property one file leaves out compared with the other file's value: the same when that value
+/// is the class's default, which is what reading the file gives. When the default isn't known, the
+/// property is something Studio adds on its own, and doesn't count.
+fn default_like(class: &str, name: &str, value: &Variant) -> bool {
+    match value {
+        Variant::Attributes(attributes) => return attributes.iter().next().is_none(),
+        Variant::Tags(tags) => return tags.iter().next().is_none(),
+        Variant::Ref(_) => return true,
+        _ => {}
+    }
+    let Ok(database) = rbx_reflection_database::get() else {
+        return true;
+    };
+    let Some(descriptor) = database.classes.get(class) else {
+        return true;
+    };
+    match database.find_default_property(descriptor, name) {
+        Some(default) => comparable(default) == comparable(value),
+        None => true,
+    }
+}
+
+fn same_instance(studio: &WeakDom, a: Ref, disk: &WeakDom, b: Ref) -> bool {
+    let (Some(x), Some(y)) = (studio.get_by_ref(a), disk.get_by_ref(b)) else {
+        return false;
+    };
+    if x.class != y.class {
+        return false;
+    }
+    let names: BTreeSet<&str> = x
+        .properties
+        .keys()
+        .chain(y.properties.keys())
+        .map(|name| name.as_str())
+        .filter(|name| *name != "UniqueId")
+        .collect();
+    for name in names {
+        let find = |instance: &Instance| {
+            instance
+                .properties
+                .iter()
+                .find(|(k, _)| k.as_str() == name)
+                .map(|(_, v)| v.clone())
+        };
+        let same = match (find(x), find(y)) {
+            (Some(p), Some(q)) => comparable(&p) == comparable(&q),
+            (Some(only), None) | (None, Some(only)) => default_like(x.class.as_str(), name, &only),
+            (None, None) => true,
+        };
+        if !same {
+            return false;
+        }
+    }
+    same_children(studio, x.children(), disk, y.children())
+}
+
+fn same_children(studio: &WeakDom, a: &[Ref], disk: &WeakDom, b: &[Ref]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut unmatched: BTreeMap<&str, Vec<Ref>> = BTreeMap::new();
+    for referent in b {
+        if let Some(instance) = disk.get_by_ref(*referent) {
+            unmatched
+                .entry(instance.name.as_str())
+                .or_default()
+                .push(*referent);
+        }
+    }
+    a.iter().all(|referent| {
+        let Some(instance) = studio.get_by_ref(*referent) else {
+            return false;
+        };
+        let partner = unmatched
+            .get_mut(instance.name.as_str())
+            .and_then(|list| (!list.is_empty()).then(|| list.remove(0)));
+        partner.is_some_and(|other| same_instance(studio, *referent, disk, other))
+    })
+}
+
+/// True when two model files hold the same instances, counting what a file leaves out as the
+/// default (a hand-written file names only what it sets). A push uses it so a model it sent
+/// doesn't look changed when Studio saves it back with every property.
+pub fn same_content(studio: &[u8], disk: &[u8]) -> Result<bool> {
+    let (a, b) = (read(studio)?, read(disk)?);
+    Ok(same_children(
+        &a,
+        a.root().children(),
+        &b,
+        b.root().children(),
+    ))
+}
+
 /// The differences between two model files. Unchanged instances are left out.
 pub fn diff(studio: &[u8], disk: &[u8]) -> Result<Vec<Node>> {
     let (a, b) = (read(studio)?, read(disk)?);
@@ -295,5 +388,37 @@ mod tests {
     #[test]
     fn the_ustr_import_is_the_one_dom_uses() {
         assert_eq!(ustr("x").as_str(), "x");
+    }
+
+    #[test]
+    fn a_file_that_leaves_out_defaults_has_the_same_content() {
+        let studio = model(|dom, root| {
+            dom.insert(
+                root,
+                InstanceBuilder::new("Part")
+                    .with_name("Crate")
+                    .with_property("Anchored", false),
+            );
+        });
+        let file = model(|dom, root| {
+            dom.insert(root, InstanceBuilder::new("Part").with_name("Crate"));
+        });
+        assert!(same_content(&studio, &file).unwrap());
+
+        let anchored = model(|dom, root| {
+            dom.insert(
+                root,
+                InstanceBuilder::new("Part")
+                    .with_name("Crate")
+                    .with_property("Anchored", true),
+            );
+        });
+        assert!(!same_content(&anchored, &file).unwrap(), "not the default");
+
+        let extra = model(|dom, root| {
+            dom.insert(root, InstanceBuilder::new("Part").with_name("Crate"));
+            dom.insert(root, InstanceBuilder::new("Part").with_name("Lid"));
+        });
+        assert!(!same_content(&extra, &file).unwrap(), "an extra instance");
     }
 }

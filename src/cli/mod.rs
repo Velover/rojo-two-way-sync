@@ -7,6 +7,7 @@ mod init;
 mod plugin;
 mod serve;
 mod sourcemap;
+mod studio;
 mod syncback;
 mod twoway;
 mod upload;
@@ -24,6 +25,7 @@ pub use self::init::{InitCommand, InitKind};
 pub use self::plugin::{PluginCommand, PluginSubcommand};
 pub use self::serve::ServeCommand;
 pub use self::sourcemap::SourcemapCommand;
+pub use self::studio::{StudioCommand, StudioSubcommand};
 pub use self::syncback::SyncbackCommand;
 pub use self::twoway::{TwowayCommand, TwowaySubcommand};
 pub use self::upload::UploadCommand;
@@ -53,6 +55,7 @@ impl Options {
             Subcommand::Plugin(subcommand) => subcommand.run(),
             Subcommand::Syncback(subcommand) => subcommand.run(self.global),
             Subcommand::Twoway(subcommand) => subcommand.run(),
+            Subcommand::Studio(subcommand) => subcommand.run(),
         }
     }
 }
@@ -129,6 +132,8 @@ pub enum Subcommand {
     Syncback(SyncbackCommand),
     /// Look after the two-way sync from a twoway.json beside the project (this fork).
     Twoway(TwowayCommand),
+    /// Work with an open Studio without connecting: list the windows, or push a project into one (this fork).
+    Studio(StudioCommand),
 }
 
 pub(super) fn resolve_path(path: &Path) -> anyhow::Result<Cow<'_, Path>> {

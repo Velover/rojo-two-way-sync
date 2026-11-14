@@ -12,7 +12,7 @@ use anyhow::{bail, Context};
 use rbx_dom_weak::{InstanceBuilder, WeakDom};
 use serde::{Deserialize, Serialize};
 use twoway::config::Config;
-use twoway::place_build::{self, BuildReport, RojoLayout};
+use twoway::place_build::{self, BuildReport, PropertyNode, RojoLayout};
 use twoway::service::Service;
 
 use crate::project::{Project, ProjectNode};
@@ -141,7 +141,14 @@ pub fn rojo_layout(project: &Project) -> RojoLayout {
             return;
         }
         if !path.is_empty() && (!node.properties.is_empty() || !node.attributes.is_empty()) {
-            layout.properties.push(path.clone());
+            let mut names: Vec<String> = node.properties.keys().map(|n| n.to_string()).collect();
+            if !node.attributes.is_empty() {
+                names.push("Attributes".to_string());
+            }
+            layout.properties.push(PropertyNode {
+                path: path.clone(),
+                names,
+            });
         }
         for (name, child) in &node.children {
             let mut child_path = path.clone();

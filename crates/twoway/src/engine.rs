@@ -408,6 +408,110 @@ fn is_init_file(path: &Path) -> bool {
         .is_some_and(|(name, _)| name == "init")
 }
 
+/// Turns what Studio reports into items. `put_text` stores a script's text and returns its hash;
+/// `model_hash` gives an uploaded model's hash by key. Names that can't be files are dropped, with
+/// a warning, along with anything under them.
+pub fn studio_items(
+    entries: Vec<StudioEntry>,
+    mut put_text: impl FnMut(&[u8]) -> Result<String>,
+    model_hash: impl Fn(&str) -> Option<String>,
+    warnings: &mut Vec<String>,
+) -> Result<Tree> {
+    let mut tree = Tree::new();
+    let mut bad: Vec<String> = Vec::new();
+    let mut lowered: BTreeMap<String, String> = BTreeMap::new();
+
+    let mut sorted = entries;
+    sorted.sort_by_key(|e| depth(&e.key));
+    for entry in sorted {
+        if bad.iter().any(|b| entry.key.starts_with(&format!("{b}/"))) {
+            continue;
+        }
+        let is_group = entry.group && entry.kind == Kind::Model && is_group_key(&entry.key);
+        if let Some(name) =
+            (!entry.key.is_empty() && !is_group).then(|| entry.key.rsplit('/').next().unwrap_or(""))
+        {
+            if let Some(problem) = name_problem(name) {
+                warnings.push(format!("skipped {}: {problem}", entry.key));
+                bad.push(entry.key.clone());
+                continue;
+            }
+        }
+        if let Some(other) = lowered.insert(entry.key.to_lowercase(), entry.key.clone()) {
+            if other != entry.key {
+                warnings.push(format!(
+                    "skipped {}: the same file name as {other}, apart from case",
+                    entry.key
+                ));
+                bad.push(entry.key.clone());
+                continue;
+            }
+        }
+        let meta = canonical_meta(entry.attributes.as_ref(), entry.tags.as_deref());
+        let item = match entry.kind {
+            Kind::Folder => Item {
+                meta,
+                ..Item::folder()
+            },
+            Kind::Script => {
+                let text = normalize_text(entry.source.as_deref().unwrap_or(""));
+                Item {
+                    kind: Kind::Script,
+                    script_type: Some(entry.script_type.unwrap_or(ScriptType::Module)),
+                    hash: Some(put_text(text.as_bytes())?),
+                    meta,
+                }
+            }
+            Kind::Model => Item {
+                kind: Kind::Model,
+                script_type: None,
+                hash: model_hash(&entry.key),
+                meta: None,
+            },
+        };
+        tree.insert(entry.key, item);
+    }
+    Ok(tree)
+}
+
+/// What both sides last agreed on for one mapping, read without changing anything.
+#[derive(Debug, Default)]
+pub struct Agreed {
+    pub base: Tree,
+    /// Versions agreed on before, by key, oldest first.
+    pub past: BTreeMap<String, Vec<String>>,
+}
+
+impl Agreed {
+    /// True when the item is the agreed one, or a version both sides agreed on before.
+    pub fn knows(&self, key: &str, item: &Option<Item>) -> bool {
+        if self.base.get(key) == item.as_ref() {
+            return item.is_some();
+        }
+        let Some(hash) = item.as_ref().and_then(|i| i.hash.as_ref()) else {
+            return false;
+        };
+        self.past
+            .get(key)
+            .is_some_and(|versions| versions.contains(hash))
+    }
+}
+
+/// The agreed state of a mapping (by [`Mapping::id`]) in the `.twoway` folder beside the config.
+/// Missing state reads as nothing agreed.
+pub fn read_agreed(project_root: &Path, mapping_id: &str) -> Result<Agreed> {
+    let path = project_root.join(".twoway").join("state.json");
+    let state: State = match fs::read_to_string(&path) {
+        Ok(text) => serde_json::from_str(&text)
+            .with_context(|| format!("{} is not valid", path.display()))?,
+        Err(_) => State::default(),
+    };
+    Ok(Agreed {
+        base: state.bases.get(mapping_id).cloned().unwrap_or_default(),
+        past: state.past.get(mapping_id).cloned().unwrap_or_default(),
+    })
+}
+
 impl Engine {
     pub fn new(config: Config, root: PathBuf) -> Result<Self> {
         let store = Store::open(&root)?;
@@ -562,66 +666,17 @@ impl Engine {
     /// Turns what Studio sent into items, storing the text. Names that can't be files are dropped
     /// with a warning, along with anything under them.
     fn items_from_entries(&mut self, mapping: usize, entries: Vec<StudioEntry>) -> Result<Tree> {
-        let mut tree = Tree::new();
-        let mut bad: Vec<String> = Vec::new();
-        let mut lowered: BTreeMap<String, String> = BTreeMap::new();
-
-        let mut sorted = entries;
-        sorted.sort_by_key(|e| depth(&e.key));
-        for entry in sorted {
-            if bad.iter().any(|b| entry.key.starts_with(&format!("{b}/"))) {
-                continue;
-            }
-            let is_group = entry.group && entry.kind == Kind::Model && is_group_key(&entry.key);
-            if let Some(name) = (!entry.key.is_empty() && !is_group)
-                .then(|| entry.key.rsplit('/').next().unwrap_or(""))
-            {
-                if let Some(problem) = name_problem(name) {
-                    self.warn(format!("skipped {}: {problem}", entry.key));
-                    bad.push(entry.key.clone());
-                    continue;
-                }
-            }
-            if let Some(other) = lowered.insert(entry.key.to_lowercase(), entry.key.clone()) {
-                if other != entry.key {
-                    self.warn(format!(
-                        "skipped {}: the same file name as {other}, apart from case",
-                        entry.key
-                    ));
-                    bad.push(entry.key.clone());
-                    continue;
-                }
-            }
-            let meta = canonical_meta(entry.attributes.as_ref(), entry.tags.as_deref());
-            let item = match entry.kind {
-                Kind::Folder => Item {
-                    meta,
-                    ..Item::folder()
-                },
-                Kind::Script => {
-                    let text = normalize_text(entry.source.as_deref().unwrap_or(""));
-                    Item {
-                        kind: Kind::Script,
-                        script_type: Some(entry.script_type.unwrap_or(ScriptType::Module)),
-                        hash: Some(self.store.put(text.as_bytes())?),
-                        meta,
-                    }
-                }
-                Kind::Model => {
-                    let hash = self
-                        .live_mut(mapping)?
-                        .uploaded_models
-                        .get(&entry.key)
-                        .cloned();
-                    Item {
-                        kind: Kind::Model,
-                        script_type: None,
-                        hash,
-                        meta: None,
-                    }
-                }
-            };
-            tree.insert(entry.key, item);
+        let uploaded = self.live_mut(mapping)?.uploaded_models.clone();
+        let mut warnings = Vec::new();
+        let store = &self.store;
+        let tree = studio_items(
+            entries,
+            |text| store.put(text),
+            |key| uploaded.get(key).cloned(),
+            &mut warnings,
+        )?;
+        for warning in warnings {
+            self.warn(warning);
         }
         Ok(tree)
     }
