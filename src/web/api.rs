@@ -97,6 +97,7 @@ impl ApiService {
             game_id: self.serve_session.game_id(),
             root_instance_id,
             twoway: crate::twoway_sync::info(),
+            confirm_page: Some(crate::web::confirm::PAGE.to_string()),
         })
     }
 

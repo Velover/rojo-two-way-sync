@@ -168,6 +168,10 @@ pub struct ServerInfoResponse {
     /// Present when a `twoway.json` turned on two-way sync. Older plugins ignore it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub twoway: Option<crate::twoway_sync::TwowayInfo>,
+    /// Where the changes waiting to be accepted are shown in the browser. Older plugins ignore it
+    /// and show them in Studio.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confirm_page: Option<String>,
 }
 
 /// Response body from /api/read/{id}

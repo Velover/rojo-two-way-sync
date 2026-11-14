@@ -2,6 +2,7 @@
 source: tests/tests/serve.rs
 expression: redactions.redacted_yaml(info)
 ---
+confirmPage: /confirm/
 expectedPlaceIds: ~
 gameId: ~
 placeId: ~

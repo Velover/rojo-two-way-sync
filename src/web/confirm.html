@@ -1,0 +1,370 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rojo changes</title>
+<style>
+	:root {
+		--bg: #ffffff;
+		--panel: #f6f8fa;
+		--border: #d0d7de;
+		--text: #1f2328;
+		--muted: #656d76;
+		--accent: #0969da;
+		--accent-text: #ffffff;
+		--add-bg: #dafbe1;
+		--add-text: #116329;
+		--del-bg: #ffebe9;
+		--del-text: #a40e26;
+		--edit-text: #9a6700;
+		--edit-bg: #fff8c5;
+	}
+	@media (prefers-color-scheme: dark) {
+		:root {
+			--bg: #0d1117;
+			--panel: #161b22;
+			--border: #30363d;
+			--text: #e6edf3;
+			--muted: #8d96a0;
+			--accent: #4493f8;
+			--accent-text: #0d1117;
+			--add-bg: #12261e;
+			--add-text: #7ee787;
+			--del-bg: #2d1215;
+			--del-text: #ff9492;
+			--edit-text: #e3b341;
+			--edit-bg: #2b2111;
+		}
+	}
+	* { box-sizing: border-box; }
+	body {
+		margin: 0;
+		background: var(--bg);
+		color: var(--text);
+		font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+	}
+	header {
+		position: sticky;
+		top: 0;
+		z-index: 1;
+		display: flex;
+		flex-wrap: wrap;
+		gap: 12px;
+		align-items: center;
+		padding: 12px 16px;
+		background: var(--panel);
+		border-bottom: 1px solid var(--border);
+	}
+	header h1 { margin: 0; font-size: 16px; }
+	header .counts { color: var(--muted); }
+	header .spacer { flex: 1; }
+	button {
+		font: inherit;
+		padding: 6px 14px;
+		border-radius: 6px;
+		border: 1px solid var(--border);
+		background: var(--bg);
+		color: var(--text);
+		cursor: pointer;
+	}
+	button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+	button:disabled { opacity: 0.5; cursor: default; }
+	main { padding: 12px 16px 40px; max-width: 1200px; margin: 0 auto; }
+	.banner {
+		padding: 10px 14px;
+		border-radius: 6px;
+		border: 1px solid var(--border);
+		background: var(--panel);
+		margin-bottom: 12px;
+	}
+	.tools { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; align-items: center; }
+	.tools button.on { border-color: var(--accent); color: var(--accent); }
+	.tools input {
+		flex: 1;
+		min-width: 160px;
+		font: inherit;
+		padding: 6px 10px;
+		border-radius: 6px;
+		border: 1px solid var(--border);
+		background: var(--bg);
+		color: var(--text);
+	}
+	details {
+		border: 1px solid var(--border);
+		border-radius: 6px;
+		margin-bottom: 6px;
+		background: var(--bg);
+	}
+	summary {
+		display: flex;
+		gap: 8px;
+		align-items: baseline;
+		padding: 7px 10px;
+		cursor: pointer;
+		list-style: none;
+	}
+	summary::-webkit-details-marker { display: none; }
+	.badge {
+		font-size: 12px;
+		padding: 1px 7px;
+		border-radius: 10px;
+		flex: none;
+	}
+	.Add .badge { background: var(--add-bg); color: var(--add-text); }
+	.Remove .badge { background: var(--del-bg); color: var(--del-text); }
+	.Edit .badge { background: var(--edit-bg); color: var(--edit-text); }
+	.path { font-family: ui-monospace, Consolas, monospace; overflow-wrap: anywhere; }
+	.class { color: var(--muted); font-size: 12px; }
+	.what { color: var(--muted); font-size: 12px; margin-left: auto; flex: none; }
+	.body { padding: 0 10px 10px; }
+	.prop { margin-top: 8px; }
+	.prop h3 { margin: 0 0 4px; font-size: 13px; }
+	.values { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+	.values .k { color: var(--muted); }
+	.values .v { overflow-wrap: anywhere; white-space: pre-wrap; }
+	pre.diff {
+		margin: 0;
+		padding: 6px 0;
+		border: 1px solid var(--border);
+		border-radius: 6px;
+		background: var(--panel);
+		font: 12px/1.5 ui-monospace, Consolas, monospace;
+		overflow-x: auto;
+	}
+	pre.diff div { padding: 0 10px; white-space: pre; }
+	pre.diff .a { background: var(--add-bg); color: var(--add-text); }
+	pre.diff .d { background: var(--del-bg); color: var(--del-text); }
+	pre.diff .gap { color: var(--muted); font-style: italic; }
+	.empty { color: var(--muted); padding: 30px 0; text-align: center; }
+	@media (max-width: 600px) {
+		header { padding: 10px 16px; }
+		.what { display: none; }
+	}
+</style>
+</head>
+<body>
+<header>
+	<h1 id="title">Rojo changes</h1>
+	<span class="counts" id="counts"></span>
+	<span class="spacer"></span>
+	<button id="abort">Abort</button>
+	<button id="accept" class="primary">Accept</button>
+</header>
+<main>
+	<div id="banner" class="banner" hidden></div>
+	<div class="tools" id="tools" hidden>
+		<button data-kind="" class="on">All</button>
+		<button data-kind="Add">Added</button>
+		<button data-kind="Remove">Removed</button>
+		<button data-kind="Edit">Changed</button>
+		<input id="search" type="search" placeholder="Filter by path">
+	</div>
+	<div id="list"><div class="empty">Waiting for Studio...</div></div>
+</main>
+<script>
+"use strict";
+
+let current = null; // { id, report, decision }
+let kind = "";
+let search = "";
+
+const $ = (id) => document.getElementById(id);
+
+function el(tag, attrs, children) {
+	const node = document.createElement(tag);
+	for (const [key, value] of Object.entries(attrs || {})) {
+		if (key === "text") node.textContent = value;
+		else node.setAttribute(key, value);
+	}
+	for (const child of children || []) if (child) node.append(child);
+	return node;
+}
+
+// Line diff: common start and end trimmed, then a longest common subsequence over the rest.
+function diffLines(oldText, newText) {
+	const a = oldText.split("\n");
+	const b = newText.split("\n");
+	let top = 0;
+	while (top < a.length && top < b.length && a[top] === b[top]) top++;
+	let tail = 0;
+	while (tail < a.length - top && tail < b.length - top && a[a.length - 1 - tail] === b[b.length - 1 - tail]) tail++;
+	const n = a.length - top - tail;
+	const m = b.length - top - tail;
+	const out = [];
+	for (let i = 0; i < top; i++) out.push([" ", a[i]]);
+	if (n * m > 4000000 || n === 0 || m === 0) {
+		for (let i = 0; i < n; i++) out.push(["-", a[top + i]]);
+		for (let j = 0; j < m; j++) out.push(["+", b[top + j]]);
+	} else {
+		const width = m + 1;
+		const cells = new Uint32Array((n + 1) * width);
+		for (let i = n - 1; i >= 0; i--) {
+			for (let j = m - 1; j >= 0; j--) {
+				cells[i * width + j] = a[top + i] === b[top + j]
+					? cells[(i + 1) * width + j + 1] + 1
+					: Math.max(cells[(i + 1) * width + j], cells[i * width + j + 1]);
+			}
+		}
+		let i = 0, j = 0;
+		while (i < n || j < m) {
+			if (i < n && j < m && a[top + i] === b[top + j]) { out.push([" ", a[top + i]]); i++; j++; }
+			else if (j >= m || (i < n && cells[(i + 1) * width + j] >= cells[i * width + j + 1])) { out.push(["-", a[top + i]]); i++; }
+			else { out.push(["+", b[top + j]]); j++; }
+		}
+	}
+	for (let i = a.length - tail; i < a.length; i++) out.push([" ", a[i]]);
+	return out;
+}
+
+// Long unchanged runs are folded down to a few lines around each change.
+function renderDiff(oldText, newText) {
+	const lines = diffLines(oldText || "", newText || "");
+	const pre = el("pre", { class: "diff" });
+	const context = 3;
+	const keep = lines.map(() => false);
+	lines.forEach(([mark], index) => {
+		if (mark !== " ") for (let k = Math.max(0, index - context); k <= Math.min(lines.length - 1, index + context); k++) keep[k] = true;
+	});
+	let skipped = 0;
+	const flush = () => {
+		if (skipped > 0) pre.append(el("div", { class: "gap", text: `... ${skipped} unchanged line${skipped === 1 ? "" : "s"}` }));
+		skipped = 0;
+	};
+	lines.forEach(([mark, text], index) => {
+		if (!keep[index]) { skipped++; return; }
+		flush();
+		pre.append(el("div", { class: mark === "+" ? "a" : mark === "-" ? "d" : "", text: `${mark} ${text}` }));
+	});
+	flush();
+	return pre;
+}
+
+const isText = (value) => typeof value === "string" && (value.includes("\n") || value.length > 120);
+
+function renderChange(item, change) {
+	const wrap = el("div", { class: "prop" }, [el("h3", { text: change.name })]);
+	if (item.kind === "Edit" && (isText(change.current) || isText(change.incoming))) {
+		wrap.append(renderDiff(String(change.current ?? ""), String(change.incoming ?? "")));
+	} else if (item.kind === "Add" && isText(change.incoming)) {
+		wrap.append(renderDiff("", String(change.incoming)));
+	} else {
+		const values = el("div", { class: "values" });
+		if (item.kind === "Edit") values.append(el("span", { class: "k", text: "Studio" }), el("span", { class: "v", text: String(change.current ?? "") }));
+		values.append(el("span", { class: "k", text: "Files" }), el("span", { class: "v", text: String(change.incoming ?? "") }));
+		wrap.append(values);
+	}
+	return wrap;
+}
+
+const kindName = { Add: "Add", Remove: "Remove", Edit: "Change" };
+
+function renderList() {
+	const list = $("list");
+	list.replaceChildren();
+	if (!current || !current.report) {
+		list.append(el("div", { class: "empty", text: "No changes are waiting. Connect from Studio to see them here." }));
+		return;
+	}
+	const items = (current.report.items || []).filter((item) =>
+		(!kind || item.kind === kind) && (!search || item.path.toLowerCase().includes(search)));
+	if (items.length === 0) {
+		list.append(el("div", { class: "empty", text: "Nothing matches." }));
+		return;
+	}
+	const shown = items.slice(0, 2000);
+	for (const item of shown) {
+		const changes = item.changes || [];
+		const what = item.kind === "Edit" ? changes.map((c) => c.name).join(", ") : "";
+		const details = el("details", { class: item.kind }, [
+			el("summary", {}, [
+				el("span", { class: "badge", text: kindName[item.kind] || item.kind }),
+				el("span", { class: "path", text: item.path }),
+				el("span", { class: "class", text: item.className || "" }),
+				what ? el("span", { class: "what", text: what }) : null,
+			]),
+		]);
+		// Bodies are built when opened, so big patches stay quick to show.
+		details.addEventListener("toggle", () => {
+			if (details.open && !details.querySelector(".body")) {
+				const body = el("div", { class: "body" });
+				if (changes.length === 0) body.append(el("div", { class: "class", text: item.kind === "Remove" ? "Removed from Studio." : "No property details." }));
+				for (const change of changes) body.append(renderChange(item, change));
+				details.append(body);
+			}
+		});
+		if (shown.length <= 20 && item.kind === "Edit") details.open = true;
+		list.append(details);
+	}
+	if (items.length > shown.length) list.append(el("div", { class: "empty", text: `${items.length - shown.length} more not shown. Filter to narrow them down.` }));
+}
+
+function renderHeader() {
+	const report = current && current.report;
+	$("title").textContent = report ? `Rojo changes for '${report.projectName}'` : "Rojo changes";
+	document.title = report ? `Rojo: ${report.projectName}` : "Rojo changes";
+	const counts = report && report.counts;
+	$("counts").textContent = counts
+		? [counts.added && `${counts.added} to add`, counts.removed && `${counts.removed} to remove`, counts.changed && `${counts.changed} to change`].filter(Boolean).join(" · ")
+		: "";
+	const decided = current && current.decision;
+	$("accept").disabled = $("abort").disabled = !report || !!decided;
+	$("tools").hidden = !report;
+	const banner = $("banner");
+	if (decided) {
+		banner.hidden = false;
+		banner.textContent = decided === "Accept"
+			? "Accepted. Rojo is applying these changes in Studio."
+			: "Aborted. Studio was left as it was.";
+	} else if (report && report.truncated) {
+		banner.hidden = false;
+		banner.textContent = "There are too many added instances to list their properties; only their paths are shown.";
+	} else {
+		banner.hidden = true;
+	}
+}
+
+async function refresh() {
+	try {
+		const response = await fetch("/api/confirm");
+		const body = await response.json();
+		const changed = !current || current.id !== body.id;
+		const decided = current && current.decision !== body.decision;
+		current = body.id == null ? null : body;
+		if (changed) renderList();
+		if (changed || decided) renderHeader();
+	} catch (error) {
+		// The server stopped; the next poll tries again.
+	}
+}
+
+async function decide(decision) {
+	if (!current) return;
+	$("accept").disabled = $("abort").disabled = true;
+	await fetch("/api/confirm/decide", {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ id: current.id, decision }),
+	});
+	await refresh();
+}
+
+$("accept").addEventListener("click", () => decide("Accept"));
+$("abort").addEventListener("click", () => decide("Abort"));
+for (const button of document.querySelectorAll(".tools button")) {
+	button.addEventListener("click", () => {
+		kind = button.dataset.kind;
+		for (const other of document.querySelectorAll(".tools button")) other.classList.toggle("on", other === button);
+		renderList();
+	});
+}
+$("search").addEventListener("input", (event) => {
+	search = event.target.value.trim().toLowerCase();
+	renderList();
+});
+
+refresh();
+setInterval(refresh, 1500);
+</script>
+</body>
+</html>

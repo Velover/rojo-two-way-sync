@@ -4,6 +4,7 @@
 
 mod api;
 mod assets;
+pub(crate) mod confirm;
 pub mod interface;
 mod origin;
 mod twoway;
@@ -87,6 +88,8 @@ impl LiveServer {
                             twoway.filter(|_| twoway_sync::handles(req.uri().path()))
                         {
                             Ok::<_, Infallible>(twoway::call(service, req).await)
+                        } else if confirm::handles(req.uri().path()) {
+                            Ok::<_, Infallible>(confirm::call(remote_addr, req).await)
                         } else if req.uri().path().starts_with("/api") {
                             Ok::<_, Infallible>(api::call(serve_session, remote_addr, req).await)
                         } else {

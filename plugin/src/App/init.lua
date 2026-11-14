@@ -2,6 +2,7 @@ local ChangeHistoryService = game:GetService("ChangeHistoryService")
 local Players = game:GetService("Players")
 local ServerStorage = game:GetService("ServerStorage")
 local RunService = game:GetService("RunService")
+local HttpService = game:GetService("HttpService")
 
 local Rojo = script:FindFirstAncestor("Rojo")
 local Plugin = Rojo.Plugin
@@ -21,6 +22,7 @@ local ServeSession = require(Plugin.ServeSession)
 local ApiContext = require(Plugin.ApiContext)
 local PatchSet = require(Plugin.PatchSet)
 local PatchTree = require(Plugin.PatchTree)
+local ConfirmReport = require(Plugin.ConfirmReport)
 local preloadAssets = require(Plugin.preloadAssets)
 local soundPlayer = require(Plugin.soundPlayer)
 local ignorePlaceIds = require(Plugin.ignorePlaceIds)
@@ -600,6 +602,82 @@ function App:useRunningConnectionInfo()
 	self.setPort(port)
 end
 
+local function postJson(url: string, value: any)
+	return HttpService:RequestAsync({
+		Url = url,
+		Method = "POST",
+		Headers = { ["Content-Type"] = "application/json" },
+		Body = HttpService:JSONEncode(value),
+	})
+end
+
+-- Sends the changes to the server's confirm page and waits for Accept or Abort from either the
+-- page or the plugin. Returns nil if the page couldn't be used, so the changes are shown here.
+function App:confirmInBrowser(baseUrl: string, patch, instanceMap, serverInfo)
+	self:setState({
+		connectingText = "Opening the changes in your browser...",
+	})
+
+	local report = ConfirmReport.build(patch, instanceMap, serverInfo.projectName)
+	local posted, response = pcall(postJson, baseUrl .. "/api/confirm", report)
+	if not posted or not response.Success then
+		Log.warn(
+			"Couldn't show the changes in the browser, so they're shown here: {}",
+			if posted then response.StatusMessage else response
+		)
+		return nil
+	end
+	local id = HttpService:JSONDecode(response.Body).id
+
+	self:setState({
+		appStatus = AppStatus.Confirming,
+		patchTree = Roact.None,
+		confirmData = {
+			serverInfo = serverInfo,
+			counts = report.counts,
+			onOpenDiff = function()
+				task.spawn(pcall, postJson, baseUrl .. "/api/confirm/open", {})
+			end,
+		},
+		toolbarIcon = Assets.Images.PluginButton,
+	})
+	self:addNotification({
+		text = "The changes are open in your browser. Accept or abort them there or here.",
+		timeout = 7,
+	})
+
+	-- A decision made on the page arrives by polling.
+	local decided = false
+	task.spawn(function()
+		while not decided and self.state.appStatus == AppStatus.Confirming do
+			task.wait(1)
+			if decided or self.state.appStatus ~= AppStatus.Confirming then
+				break
+			end
+			local ok, poll = pcall(HttpService.RequestAsync, HttpService, {
+				Url = baseUrl .. "/api/confirm/decision?id=" .. tostring(id),
+				Method = "GET",
+			})
+			if ok and poll.Success then
+				local decision = HttpService:JSONDecode(poll.Body).decision
+				if decision ~= nil and not decided then
+					decided = true
+					self.confirmationBindable:Fire(decision)
+				end
+			elseif ok and poll.StatusCode == 410 then
+				-- Another connect replaced these changes.
+				break
+			end
+		end
+	end)
+
+	local decision = self.confirmationEvent:Wait()
+	decided = true
+	-- Lets the page show what was decided here.
+	task.spawn(pcall, postJson, baseUrl .. "/api/confirm/decide", { id = id, decision = decision })
+	return decision
+end
+
 function App:startSession()
 	local claimedLock, priorOwner = self:claimSyncLock()
 	if not claimedLock then
@@ -806,6 +884,15 @@ function App:startSession()
 			then
 				Log.trace("Accepting patch without confirmation because it only contains a datamodel name change")
 				return "Accept"
+			end
+		end
+
+		-- A server with a confirm page shows the changes in the browser, which is quicker than
+		-- building them into a tree here and has room for script diffs.
+		if serverInfo.confirmPage ~= nil then
+			local decision = self:confirmInBrowser(baseUrl, patch, instanceMap, serverInfo)
+			if decision ~= nil then
+				return decision
 			end
 		end
 

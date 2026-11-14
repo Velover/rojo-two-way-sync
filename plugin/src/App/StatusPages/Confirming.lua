@@ -14,6 +14,21 @@ local TableDiffVisualizer = require(Plugin.App.Components.TableDiffVisualizer)
 
 local e = Roact.createElement
 
+-- "3 to add · 1 to change", from the counts the server's confirm page was sent.
+local function describeCounts(counts)
+	local parts = {}
+	if counts.added > 0 then
+		table.insert(parts, `{counts.added} to add`)
+	end
+	if counts.removed > 0 then
+		table.insert(parts, `{counts.removed} to remove`)
+	end
+	if counts.changed > 0 then
+		table.insert(parts, `{counts.changed} to change`)
+	end
+	return table.concat(parts, " · ")
+end
+
 local ConfirmingPage = Roact.Component:extend("ConfirmingPage")
 
 function ConfirmingPage:init()
@@ -48,28 +63,49 @@ function ConfirmingPage:render()
 				BackgroundTransparency = 1,
 			}),
 
-			PatchVisualizer = e(PatchVisualizer, {
-				size = UDim2.new(1, 0, 1, -100),
-				transparency = self.props.transparency,
-				layoutOrder = 3,
+			-- With a confirm page, the details are in the browser and only a summary is shown here.
+			Summary = if self.props.confirmData.counts
+				then e("TextLabel", {
+					Text = describeCounts(self.props.confirmData.counts)
+						.. "\n\nThe full diff is open in your browser, where you can also accept or abort.",
+					FontFace = theme.Font.Main,
+					LineHeight = 1.2,
+					TextSize = theme.TextSize.Body,
+					TextColor3 = theme.TextColor,
+					TextXAlignment = Enum.TextXAlignment.Left,
+					TextYAlignment = Enum.TextYAlignment.Top,
+					TextWrapped = true,
+					TextTransparency = self.props.transparency,
+					Size = UDim2.new(1, 0, 0, 90),
+					LayoutOrder = 3,
+					BackgroundTransparency = 1,
+				})
+				else nil,
 
-				patchTree = self.props.patchTree,
+			PatchVisualizer = if self.props.confirmData.counts
+				then nil
+				else e(PatchVisualizer, {
+					size = UDim2.new(1, 0, 1, -100),
+					transparency = self.props.transparency,
+					layoutOrder = 3,
 
-				showStringDiff = function(currentString: string, incomingString: string)
-					self:setState({
-						showingStringDiff = true,
-						currentString = currentString,
-						incomingString = incomingString,
-					})
-				end,
-				showTableDiff = function(oldTable: { [any]: any? }, newTable: { [any]: any? })
-					self:setState({
-						showingTableDiff = true,
-						oldTable = oldTable,
-						newTable = newTable,
-					})
-				end,
-			}),
+					patchTree = self.props.patchTree,
+
+					showStringDiff = function(currentString: string, incomingString: string)
+						self:setState({
+							showingStringDiff = true,
+							currentString = currentString,
+							incomingString = incomingString,
+						})
+					end,
+					showTableDiff = function(oldTable: { [any]: any? }, newTable: { [any]: any? })
+						self:setState({
+							showingTableDiff = true,
+							oldTable = oldTable,
+							newTable = newTable,
+						})
+					end,
+				}),
 
 			Buttons = e("Frame", {
 				Size = UDim2.new(1, 0, 0, 34),
@@ -87,6 +123,20 @@ function ConfirmingPage:render()
 						text = "Stop the connection process",
 					}),
 				}),
+
+				ViewDiff = if self.props.confirmData.counts
+					then e(TextButton, {
+						text = "View diff",
+						style = "Bordered",
+						transparency = self.props.transparency,
+						layoutOrder = 2,
+						onClick = self.props.confirmData.onOpenDiff,
+					}, {
+						Tip = e(Tooltip.Trigger, {
+							text = "Open the changes in your browser again",
+						}),
+					})
+					else nil,
 
 				Accept = e(TextButton, {
 					text = "Accept",
