@@ -220,6 +220,15 @@ function SettingsPage:render()
 				layoutOrder = layoutIncrement(),
 			}),
 
+			DebugConnectFromAttribute = e(Setting, {
+				id = "debugConnectFromAttribute",
+				name = "Connect From An Attribute",
+				description = "Connect when ServerStorage.__Rojo_Connect is set to a port or host:port (or disconnect), without confirming. For debugging and agents.",
+				tag = "debug",
+				transparency = self.props.transparency,
+				layoutOrder = layoutIncrement(),
+			}),
+
 			OpenScriptsExternally = e(Setting, {
 				id = "openScriptsExternally",
 				name = "Open Scripts Externally",

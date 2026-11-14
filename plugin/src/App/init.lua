@@ -23,6 +23,7 @@ local ApiContext = require(Plugin.ApiContext)
 local PatchSet = require(Plugin.PatchSet)
 local PatchTree = require(Plugin.PatchTree)
 local ConfirmReport = require(Plugin.ConfirmReport)
+local DebugConnect = require(Plugin.DebugConnect)
 local preloadAssets = require(Plugin.preloadAssets)
 local soundPlayer = require(Plugin.soundPlayer)
 local ignorePlaceIds = require(Plugin.ignorePlaceIds)
@@ -162,6 +163,9 @@ function App:init()
 		self:useRunningConnectionInfo()
 		self:startSession()
 	end
+	if RunService:IsEdit() then
+		self.stopDebugConnect = DebugConnect.watch(self)
+	end
 	self.autoConnectPlaytestServerListener = Settings:onChanged("autoConnectPlaytestServer", function(enabled)
 		if enabled then
 			if self:isAutoConnectPlaytestServerWriteable() and self.serveSession ~= nil then
@@ -191,6 +195,9 @@ function App:willUnmount()
 
 	self.autoConnectPlaytestServerListener()
 	self:clearRunningConnectionInfo()
+	if self.stopDebugConnect then
+		self.stopDebugConnect()
+	end
 end
 
 function App:addNotification(notif: {
@@ -767,6 +774,7 @@ function App:startSession()
 				appStatus = AppStatus.Connecting,
 				toolbarIcon = Assets.Images.PluginButton,
 			})
+			DebugConnect.report("connecting")
 			self:addNotification({
 				text = "Connecting to session...",
 			})
@@ -776,6 +784,7 @@ function App:startSession()
 			self:setRunningConnectionInfo(baseUrl)
 
 			local address = ("%s:%s"):format(host, port)
+			DebugConnect.report(string.format("connected %s %s", details, address))
 			self:setState({
 				appStatus = AppStatus.Connected,
 				projectName = details,
@@ -787,6 +796,8 @@ function App:startSession()
 			})
 		elseif status == ServeSession.Status.Disconnected then
 			self.serveSession = nil
+			self.connectedFromAttribute = false
+			DebugConnect.report(if details ~= nil then "error " .. tostring(details) else "disconnected")
 			self:releaseSyncLock()
 			self:clearRunningConnectionInfo()
 			self:setState({
@@ -827,6 +838,12 @@ function App:startSession()
 	serveSession:setConfirmCallback(function(instanceMap, patch, serverInfo)
 		if PatchSet.isEmpty(patch) then
 			Log.trace("Accepting patch without confirmation because it is empty")
+			return "Accept"
+		end
+
+		-- A connect asked for through the debug attribute has nobody to confirm it.
+		if self.connectedFromAttribute then
+			Log.trace("Accepting patch without confirmation because it was asked for through an attribute")
 			return "Accept"
 		end
 
