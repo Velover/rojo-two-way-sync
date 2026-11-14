@@ -8,6 +8,7 @@ Use the following format:
 ```
 ## Unreleased
 
+* `rojo serve` now also runs the twoway sync when a `twoway.json` sits beside the project: the Studio trees it lists sync both ways, and conflicts are reviewed at `/twoway/`. A mapping that overlaps a tree the project fills from files is refused.
 * Made a change to Rojo ([#0000])
 
 [#0000]:  https://github.com/rojo-rbx/rojo/pull/0000

@@ -23,6 +23,7 @@ mod session_id;
 mod snapshot;
 mod snapshot_middleware;
 mod syncback;
+mod twoway_sync;
 mod variant_eq;
 mod web;
 

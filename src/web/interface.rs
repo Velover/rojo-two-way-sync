@@ -165,6 +165,9 @@ pub struct ServerInfoResponse {
     pub game_id: Option<u64>,
     pub place_id: Option<u64>,
     pub root_instance_id: Ref,
+    /// Present when a `twoway.json` turned on two-way sync. Older plugins ignore it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub twoway: Option<crate::twoway_sync::TwowayInfo>,
 }
 
 /// Response body from /api/read/{id}

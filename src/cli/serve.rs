@@ -67,7 +67,21 @@ impl ServeCommand {
             self.allowed_hosts
         };
 
-        let server = LiveServer::new(session);
+        let twoway = crate::twoway_sync::start_if_configured(
+            session.root_dir(),
+            &session.root_project().tree,
+            port,
+        )?;
+        if let Some(service) = &twoway {
+            let mappings = service.engine().config.mappings.len();
+            println!(
+                "Two-way sync is on for {mappings} tree(s) from {}; conflicts are reviewed at http://localhost:{port}{}/",
+                crate::twoway_sync::CONFIG_FILE,
+                crate::twoway_sync::BASE
+            );
+        }
+
+        let server = LiveServer::new(session).with_twoway(twoway);
 
         server.start((ip, port).into(), allowed_hosts, || {
             let _ = show_start_message(ip, port, global.color.into());

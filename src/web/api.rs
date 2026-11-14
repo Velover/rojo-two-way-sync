@@ -96,6 +96,7 @@ impl ApiService {
             place_id: self.serve_session.place_id(),
             game_id: self.serve_session.game_id(),
             root_instance_id,
+            twoway: crate::twoway_sync::info(),
         })
     }
 

@@ -6,6 +6,7 @@ mod api;
 mod assets;
 pub mod interface;
 mod origin;
+mod twoway;
 mod ui;
 mod util;
 
@@ -22,14 +23,25 @@ use hyper::{
 use tokio::runtime::Runtime;
 
 use crate::serve_session::ServeSession;
+use crate::twoway_sync;
 
 pub struct LiveServer {
     serve_session: Arc<ServeSession>,
+    twoway: Option<Arc<::twoway::service::Service>>,
 }
 
 impl LiveServer {
     pub fn new(serve_session: Arc<ServeSession>) -> Self {
-        LiveServer { serve_session }
+        LiveServer {
+            serve_session,
+            twoway: None,
+        }
+    }
+
+    /// Serves the twoway sync next to Rojo's API, under `/twoway`.
+    pub fn with_twoway(mut self, service: Option<Arc<::twoway::service::Service>>) -> Self {
+        self.twoway = service;
+        self
     }
 
     /// Starts the server on the given address, blocking until it stops.
@@ -47,16 +59,19 @@ impl LiveServer {
         on_listening: impl FnOnce(),
     ) -> anyhow::Result<()> {
         let serve_session = Arc::clone(&self.serve_session);
+        let twoway = self.twoway.clone();
         let allowed_hosts = origin::allowed_hosts(address.ip(), address.port(), &allowed_hosts);
 
         let make_service = make_service_fn(move |conn: &AddrStream| {
             let serve_session = Arc::clone(&serve_session);
+            let twoway = twoway.clone();
             let allowed_hosts = allowed_hosts.clone();
             let remote_addr = conn.remote_addr();
 
             async move {
                 let service = move |req: Request<Body>| {
                     let serve_session = Arc::clone(&serve_session);
+                    let twoway = twoway.clone();
                     let allowed_hosts = allowed_hosts.clone();
 
                     async move {
@@ -68,7 +83,11 @@ impl LiveServer {
                             return Ok::<_, Infallible>(response);
                         }
 
-                        if req.uri().path().starts_with("/api") {
+                        if let Some(service) =
+                            twoway.filter(|_| twoway_sync::handles(req.uri().path()))
+                        {
+                            Ok::<_, Infallible>(twoway::call(service, req).await)
+                        } else if req.uri().path().starts_with("/api") {
                             Ok::<_, Infallible>(api::call(serve_session, remote_addr, req).await)
                         } else {
                             Ok::<_, Infallible>(ui::call(serve_session, req).await)
@@ -82,6 +101,9 @@ impl LiveServer {
 
         let rt = Runtime::new().context("Failed to start the async runtime for the web server")?;
         let _guard = rt.enter();
+        if let Some(service) = &self.twoway {
+            rt.spawn(Arc::clone(service).watch());
+        }
         let server = Server::try_bind(&address)
             .with_context(|| {
                 format!(
