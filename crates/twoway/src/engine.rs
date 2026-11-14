@@ -174,14 +174,7 @@ impl Store {
         let kept = &lines[lines.len().saturating_sub(HISTORY_KEPT)..];
         if kept.len() < lines.len() {
             let temp_history = self.dir.join("history.jsonl.tmp");
-            fs::write(
-                &temp_history,
-                kept.join(
-                    "
-",
-                ) + "
-",
-            )?;
+            fs::write(&temp_history, kept.join("\n") + "\n")?;
             fs::rename(&temp_history, &history_path)?;
             tidied.history_lines = lines.len() - kept.len();
         }
