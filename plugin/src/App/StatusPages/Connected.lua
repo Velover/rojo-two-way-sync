@@ -259,6 +259,75 @@ local function ConnectionDetails(props)
 	end)
 end
 
+-- The two-way sync's trees and what waits for review, when the server runs one.
+local function TwoWayDetails(props)
+	local status = props.status
+	local lines = {}
+	if status.error then
+		table.insert(lines, status.error)
+	elseif not status.active then
+		table.insert(lines, "Connecting...")
+	else
+		local review = if status.conflicts == 1 then "1 item to review" else `{status.conflicts} items to review`
+		table.insert(lines, `{#status.mappings} tree(s) both ways · {review}`)
+	end
+	local warnings = #(status.warnings or {}) + #(status.notices or {})
+	if warnings > 0 then
+		table.insert(lines, `{warnings} warning(s): see the review page`)
+	end
+
+	return Theme.with(function(theme)
+		return e(BorderedContainer, {
+			transparency = props.transparency,
+			size = UDim2.new(1, 0, 0, 62),
+			layoutOrder = props.layoutOrder,
+		}, {
+			Title = e("TextLabel", {
+				Text = "Two-way sync",
+				FontFace = theme.Font.Bold,
+				TextSize = theme.TextSize.Medium,
+				TextColor3 = theme.ConnectionDetails.ProjectNameColor,
+				TextTransparency = props.transparency,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				Position = UDim2.new(0, 17, 0, 10),
+				Size = UDim2.new(1, -140, 0, theme.TextSize.Medium),
+				BackgroundTransparency = 1,
+			}),
+
+			Details = e("TextLabel", {
+				Text = table.concat(lines, "\n"),
+				FontFace = theme.Font.Main,
+				TextSize = theme.TextSize.Body,
+				TextColor3 = if status.conflicts and status.conflicts > 0
+					then theme.Diff.Warning
+					else theme.ConnectionDetails.AddressColor,
+				TextTransparency = props.transparency,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				TextYAlignment = Enum.TextYAlignment.Top,
+				TextWrapped = true,
+				Position = UDim2.new(0, 17, 0, 14 + theme.TextSize.Medium),
+				Size = UDim2.new(1, -140, 1, -(18 + theme.TextSize.Medium)),
+				BackgroundTransparency = 1,
+			}),
+
+			Review = e("Frame", {
+				AnchorPoint = Vector2.new(1, 0.5),
+				Position = UDim2.new(1, -15, 0.5, 0),
+				Size = UDim2.new(0, 0, 0, 34),
+				AutomaticSize = Enum.AutomaticSize.X,
+				BackgroundTransparency = 1,
+			}, {
+				Button = e(TextButton, {
+					text = "Review page",
+					style = "Bordered",
+					transparency = props.transparency,
+					onClick = props.onOpenReview,
+				}),
+			}),
+		})
+	end)
+end
+
 local ConnectedPage = Roact.Component:extend("ConnectedPage")
 
 function ConnectedPage:getChangeInfoText()
@@ -442,9 +511,18 @@ function ConnectedPage:render()
 				onDisconnect = self.props.onDisconnect,
 			}),
 
+			TwoWayDetails = if self.props.twoWayStatus
+				then e(TwoWayDetails, {
+					status = self.props.twoWayStatus,
+					transparency = self.props.transparency,
+					layoutOrder = 3,
+					onOpenReview = self.props.onOpenTwoWayReview,
+				})
+				else nil,
+
 			Buttons = e("Frame", {
 				Size = UDim2.new(1, 0, 0, 34),
-				LayoutOrder = 3,
+				LayoutOrder = 4,
 				BackgroundTransparency = 1,
 				ZIndex = 2,
 			}, {

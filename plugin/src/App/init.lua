@@ -628,8 +628,16 @@ function App:startSession()
 
 	local serveSession = ServeSession.new({
 		apiContext = apiContext,
-		twoWaySync = Settings:get("twoWaySync"),
+		-- Rojo's own Studio-to-files writes stay off: the trees in a project's twoway.json are
+		-- synced both ways by TwoWay instead.
+		twoWaySync = false,
 	})
+
+	serveSession:onTwoWayStatus(function(twoWayStatus)
+		self:setState({
+			twoWayStatus = twoWayStatus,
+		})
+	end)
 
 	serveSession:setUpdateLoadingTextCallback(function(text: string)
 		self:setState({
@@ -814,10 +822,7 @@ function App:startSession()
 		})
 
 		self:addNotification({
-			text = string.format(
-				"Please accept%sor abort the initializing sync session.",
-				Settings:get("twoWaySync") and ", reject, " or " "
-			),
+			text = "Please accept or abort the initializing sync session.",
 			timeout = 7,
 		})
 
@@ -837,6 +842,9 @@ function App:endSession()
 	Log.trace("Disconnecting session")
 
 	self.serveSession:stop()
+	self:setState({
+		twoWayStatus = Roact.None,
+	})
 	self.serveSession = nil
 	self:setState({
 		appStatus = AppStatus.NotConnected,
@@ -927,9 +935,6 @@ function App:render()
 						onAccept = function()
 							self.confirmationBindable:Fire("Accept")
 						end,
-						onReject = function()
-							self.confirmationBindable:Fire("Reject")
-						end,
 					}),
 
 					Connecting = createPageElement(AppStatus.Connecting, {
@@ -942,6 +947,13 @@ function App:render()
 						patchTree = self.state.patchTree,
 						patchData = self.state.patchData,
 						serveSession = self.serveSession,
+						twoWayStatus = self.state.twoWayStatus,
+
+						onOpenTwoWayReview = function()
+							if self.serveSession ~= nil then
+								self.serveSession:openTwoWayReviewPage()
+							end
+						end,
 
 						onDisconnect = function()
 							self:endSession()

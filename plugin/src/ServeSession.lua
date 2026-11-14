@@ -19,6 +19,7 @@ local Reconciler = require(script.Parent.Reconciler)
 local strict = require(script.Parent.strict)
 local Settings = require(script.Parent.Settings)
 local orderSwaps = require(script.Parent.orderSwaps)
+local TwoWay = require(script.Parent.TwoWay)
 
 local Status = strict("Session.Status", {
 	NotStarted = "NotStarted",
@@ -105,6 +106,7 @@ function ServeSession.new(options)
 		__instanceMap = instanceMap,
 		__changeBatcher = changeBatcher,
 		__statusChangedCallback = nil,
+		__twoWayStatusCallback = nil,
 		__connections = connections,
 		__precommitCallbacks = {},
 		__postcommitCallbacks = {},
@@ -133,6 +135,16 @@ end
 
 function ServeSession:onStatusChanged(callback)
 	self.__statusChangedCallback = callback
+end
+
+-- Called with a summary of the two-way sync whenever it changes. Only servers with a
+-- twoway.json run one.
+function ServeSession:onTwoWayStatus(callback)
+	self.__twoWayStatusCallback = callback
+end
+
+function ServeSession:openTwoWayReviewPage()
+	TwoWay.openReviewPage()
 end
 
 function ServeSession:setConfirmCallback(callback)
@@ -201,6 +213,19 @@ function ServeSession:start()
 				self:setLoadingText("Starting sync loop...")
 				self:__setStatus(Status.Connected, serverInfo.projectName)
 				self:__applyGameAndPlaceId(serverInfo)
+
+				-- A server with a twoway.json also syncs some trees both ways. One Connect
+				-- starts both.
+				if serverInfo.twoway ~= nil then
+					TwoWay.start({
+						baseUrl = self.__apiContext:getBaseUrl() .. serverInfo.twoway.base,
+						onStatus = function(twoWayStatus)
+							if self.__twoWayStatusCallback ~= nil then
+								self.__twoWayStatusCallback(twoWayStatus)
+							end
+						end,
+					})
+				end
 
 				return self.__apiContext:connectWebSocket({
 					["messages"] = function(messagesPacket)
@@ -569,6 +594,7 @@ function ServeSession:__initialSync(serverInfo)
 end
 
 function ServeSession:__stopInternal(err)
+	TwoWay.stop()
 	self:__setStatus(Status.Disconnected, err)
 	self.__apiContext:disconnect()
 	self.__instanceMap:stop()

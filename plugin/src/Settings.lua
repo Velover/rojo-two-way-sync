@@ -11,7 +11,6 @@ local Roact = require(Packages.Roact)
 
 local defaultSettings = {
 	openScriptsExternally = false,
-	twoWaySync = false,
 	autoReconnect = false,
 	showNotifications = true,
 	enableSyncFallback = true,

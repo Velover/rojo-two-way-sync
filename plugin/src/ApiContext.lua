@@ -121,6 +121,10 @@ function ApiContext:__fmtDebug(output)
 	output:write("}")
 end
 
+function ApiContext:getBaseUrl()
+	return self.__baseUrl
+end
+
 function ApiContext:disconnect()
 	self.__connected = false
 	for request in self.__activeRequests do

@@ -4,7 +4,6 @@ local Packages = Rojo.Packages
 
 local Roact = require(Packages.Roact)
 
-local Settings = require(Plugin.Settings)
 local Theme = require(Plugin.App.Theme)
 local TextButton = require(Plugin.App.Components.TextButton)
 local StudioPluginGui = require(Plugin.App.Components.Studio.StudioPluginGui)
@@ -88,20 +87,6 @@ function ConfirmingPage:render()
 						text = "Stop the connection process",
 					}),
 				}),
-
-				Reject = if Settings:get("twoWaySync")
-					then e(TextButton, {
-						text = "Reject",
-						style = "Bordered",
-						transparency = self.props.transparency,
-						layoutOrder = 2,
-						onClick = self.props.onReject,
-					}, {
-						Tip = e(Tooltip.Trigger, {
-							text = "Push Studio changes to the Rojo server",
-						}),
-					})
-					else nil,
 
 				Accept = e(TextButton, {
 					text = "Accept",
