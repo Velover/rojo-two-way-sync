@@ -37,7 +37,7 @@ local generation = 0
 local warned = {}
 local notices = {}
 local last_error = nil
-local daemon_status = nil
+local server_status = nil
 -- Where the sync is served, such as "http://localhost:34872/twoway".
 local base_url = nil
 local status_callback = nil
@@ -52,8 +52,8 @@ local function Refresh()
 		status_callback({
 			active = session ~= nil,
 			mappings = mapping_list,
-			conflicts = daemon_status and daemon_status.conflicts or 0,
-			warnings = daemon_status and daemon_status.warnings or {},
+			conflicts = server_status and server_status.conflicts or 0,
+			warnings = server_status and server_status.warnings or {},
 			notices = notices,
 			error = last_error,
 		})
@@ -600,7 +600,7 @@ local function ApplyScriptSource(instance, text)
 end
 
 ---------------------------------------------------------------------------------------------------
--- Carrying out the daemon's ops
+-- Carrying out the server's ops
 
 local function EnsureParent(mapping, key)
 	local parts = Split(mapping.studio)
@@ -698,7 +698,7 @@ local function ApplyUpsert(mapping, op)
 
 	local entry = { key = op.key, kind = "script", source = op.source, attributes = op.attributes, tags = op.tags }
 	local same_family = instance and ScriptTypeOf(instance) == op.scriptType
-	-- The daemon speaks Script Sync's names too: they're the same families.
+	-- The server speaks Script Sync's names too: they're the same families.
 	if op.scriptType == "local" or op.scriptType == "legacy" then
 		same_family = instance and ScriptTypeOf(instance) == (op.scriptType == "local" and "client" or "server")
 	end
@@ -708,7 +708,7 @@ local function ApplyUpsert(mapping, op)
 		local previous = mapping.known[op.key]
 		if editor ~= op.source then
 			if previous and previous.source ~= editor then
-				-- Typed since the last report: don't overwrite it. It goes to the daemon, which
+				-- Typed since the last report: don't overwrite it. It goes to the server, which
 				-- sees both edits and asks.
 				Flush(mapping)
 				return false
@@ -817,11 +817,10 @@ local function Disconnect(message)
 	Refresh()
 end
 
-local function Connect(manual)
+local function Connect()
 	local response, failure = Request("POST", "/api/connect", {
 		placeId = game.PlaceId,
 		placeName = PLACE_NAME,
-		manual = manual,
 	})
 	if not response then
 		last_error = "The two-way sync didn't answer: " .. tostring(failure)
@@ -906,7 +905,7 @@ function TwoWay.start(options)
 	warned = {}
 	notices = {}
 	last_error = nil
-	daemon_status = nil
+	server_status = nil
 
 	typing_connection = ScriptEditorService.TextDocumentDidChange:Connect(function()
 		if session then
@@ -916,13 +915,13 @@ function TwoWay.start(options)
 	end)
 
 	task.spawn(function()
-		Connect(true)
+		Connect()
 
 		-- The server's summary, for Rojo's connected page.
 		task.spawn(function()
 			while Current() and session do
 				local response = Request("GET", "/api/status")
-				daemon_status = response and response.Success and Decode(response) or nil
+				server_status = response and response.Success and Decode(response) or nil
 				Refresh()
 				task.wait(STATUS_SECONDS)
 			end

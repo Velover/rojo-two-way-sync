@@ -156,7 +156,7 @@ mod test {
     #[test]
     fn only_the_sync_s_own_paths_are_routed_to_it() {
         assert!(handles("/twoway"));
-        assert!(handles("/twoway/api/info"));
+        assert!(handles("/twoway/api/status"));
         assert!(!handles("/twowayx"));
         assert!(!handles("/api/rojo"));
     }
