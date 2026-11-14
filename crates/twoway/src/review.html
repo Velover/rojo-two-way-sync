@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>twoway review</title>
+<style>
+	:root {
+		--bg: #17181c; --panel: #1f2127; --line: #30333b; --text: #e4e6eb; --dim: #9096a3;
+		--accent: #5b9cf5; --add: #1f3b2a; --addtext: #7fd69b; --del: #43242a; --deltext: #f09aa3; --warn: #e6b450;
+	}
+	@media (prefers-color-scheme: light) {
+		:root {
+			--bg: #f4f5f7; --panel: #fff; --line: #dfe1e6; --text: #1d2026; --dim: #626b7a;
+			--accent: #1f6fd6; --add: #dcf5e3; --addtext: #17693a; --del: #fbe0e3; --deltext: #a3202f; --warn: #94650a;
+		}
+	}
+	* { box-sizing: border-box; }
+	body { margin: 0; font: 14px/1.45 system-ui, sans-serif; background: var(--bg); color: var(--text); }
+	header { padding: 12px 20px; border-bottom: 1px solid var(--line); display: flex; gap: 12px; align-items: baseline; }
+	h1 { font-size: 16px; margin: 0; }
+	.dim { color: var(--dim); }
+	main { display: grid; grid-template-columns: 300px minmax(0, 1fr); min-height: calc(100vh - 49px); }
+	nav { border-right: 1px solid var(--line); padding: 8px; }
+	nav button { display: block; width: 100%; text-align: left; background: none; border: 0; color: inherit; font: inherit; padding: 8px 10px; border-radius: 6px; cursor: pointer; }
+	nav button:hover { background: var(--panel); }
+	nav button.on { background: var(--panel); outline: 1px solid var(--accent); }
+	nav small { display: block; color: var(--dim); }
+	nav h3 { margin: 14px 10px 4px; }
+	nav .actions { margin: 4px 2px 8px; }
+	section { padding: 16px 20px; min-width: 0; }
+	h2 { font-size: 15px; margin: 0 0 2px; word-break: break-all; }
+	h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--dim); margin: 20px 0 6px; }
+	.actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+	.actions button { font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); color: inherit; cursor: pointer; }
+	.actions button.main { background: var(--accent); border-color: var(--accent); color: #fff; }
+	.actions button:hover { border-color: var(--accent); }
+	pre { margin: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 8px 0; overflow: auto; max-height: 60vh; font: 12.5px/1.5 ui-monospace, Consolas, monospace; }
+	pre div { padding: 0 12px; white-space: pre; min-height: 1.5em; }
+	.a { background: var(--add); color: var(--addtext); }
+	.d { background: var(--del); color: var(--deltext); }
+	.h { color: var(--dim); }
+	.notice { color: var(--warn); }
+	.tree, .tree ul { list-style: none; margin: 0; padding-left: 16px; }
+	.tree { padding-left: 0; }
+	.tree li { padding: 2px 0; }
+	.badge { font-size: 11px; padding: 0 6px; border-radius: 8px; background: var(--panel); border: 1px solid var(--line); margin-left: 6px; }
+	.badge.onlyStudio { color: var(--addtext); }
+	.badge.onlyDisk { color: var(--deltext); }
+	table { border-collapse: collapse; margin: 4px 0 6px; font-size: 12.5px; }
+	th, td { border: 1px solid var(--line); padding: 2px 8px; text-align: left; vertical-align: top; max-width: 420px; word-break: break-all; }
+	th { color: var(--dim); font-weight: 500; }
+	.empty { color: var(--dim); padding: 40px 0; text-align: center; }
+	.sides { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+	@media (max-width: 760px) { .sides { grid-template-columns: 1fr; } }
+	@media (max-width: 760px) { main { grid-template-columns: 1fr; } nav { border-right: 0; border-bottom: 1px solid var(--line); } }
+</style>
+</head>
+<body>
+<header><h1>twoway</h1><span id="status" class="dim"></span></header>
+<main>
+	<nav id="list"></nav>
+	<section id="detail"></section>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const el = (tag, props = {}, ...children) => {
+	const node = Object.assign(document.createElement(tag), props);
+	node.append(...children);
+	return node;
+};
+let selected = null;
+let state = null;
+let shown = "";
+
+const call = async (path, body) => {
+	const response = await fetch(path, body === undefined ? {} : { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+	const data = await response.json();
+	if (!response.ok) throw new Error(data.error || response.statusText);
+	return data;
+};
+
+function diffLines(text) {
+	const pre = el("pre");
+	for (const line of text.split("\n")) {
+		const kind = line.startsWith("@@") || line.startsWith("---") || line.startsWith("+++") ? "h" : line[0] === "+" ? "a" : line[0] === "-" ? "d" : "";
+		pre.append(el("div", { className: kind, textContent: line }));
+	}
+	return pre;
+}
+
+function plain(text) {
+	const pre = el("pre");
+	for (const line of text.split("\n")) pre.append(el("div", { textContent: line }));
+	return pre;
+}
+
+function modelNode(node) {
+	const label = { same: "", changed: "changed", onlyStudio: "only in Studio", onlyDisk: "only on disk" }[node.status];
+	const li = el("li", {}, `${node.name} `, el("span", { className: "dim", textContent: node.class }));
+	if (label) li.append(el("span", { className: `badge ${node.status}`, textContent: label }));
+	if (node.status !== "changed" && node.descendants) li.append(el("span", { className: "dim", textContent: ` and ${node.descendants} inside` }));
+	if (node.properties.length) {
+		const table = el("table");
+		table.append(el("tr", {}, el("th", { textContent: "Property" }), el("th", { textContent: "Studio" }), el("th", { textContent: "Disk" })));
+		for (const p of node.properties) {
+			table.append(el("tr", {}, el("td", { textContent: p.name }), el("td", { textContent: p.studio ?? "(none)" }), el("td", { textContent: p.disk ?? "(none)" })));
+		}
+		li.append(table);
+	}
+	if (node.children.length) li.append(el("ul", {}, ...node.children.map(modelNode)));
+	return li;
+}
+
+const isFolder = (c) => (c.studio ?? c.disk)?.kind === "folder";
+
+// A folder settles with what's inside it, so it's only listed when nothing inside is in review.
+const visible = () => state.conflicts.filter((c) => !isFolder(c) || !state.conflicts.some((other) =>
+	other.id !== c.id && other.mapping === c.mapping && (c.key === "" || other.key.startsWith(`${c.key}/`))));
+
+const rootName = (c) => c.studioRoot.split("/").pop();
+const fullPath = (c) => (c.key ? `${c.studioRoot}/${c.key}` : c.studioRoot);
+
+async function settleAll(choice) {
+	const label = choice === "disk" ? "disk" : "Studio";
+	if (!confirm(`Keep the ${label} version of all ${visible().length} items?`)) return;
+	const failed = [];
+	for (const conflict of visible()) {
+		try {
+			await call(`api/conflicts/${conflict.id}/resolve`, {
+				choice,
+				studioHash: conflict.studio?.hash ?? null,
+				diskHash: conflict.disk?.hash ?? null,
+			});
+		} catch (error) {
+			failed.push(`${conflict.key}: ${error.message}`);
+		}
+	}
+	if (failed.length) alert(failed.join("\n"));
+	selected = null;
+	shown = "";
+	await refresh();
+}
+
+async function settle(conflict, choice, extra = {}) {
+	try {
+		await call(`api/conflicts/${conflict.id}/resolve`, {
+			choice,
+			studioHash: conflict.studio?.hash ?? null,
+			diskHash: conflict.disk?.hash ?? null,
+			...extra,
+		});
+		selected = null;
+		shown = "";
+		await refresh();
+	} catch (error) {
+		alert(error.message);
+		shown = "";
+		await refresh();
+	}
+}
+
+const button = (label, onclick, main) => el("button", { textContent: label, onclick, className: main ? "main" : "" });
+
+async function showConflict(conflict) {
+	const detail = $("detail");
+	const data = await call(`api/conflicts/${conflict.id}`);
+	const sides = (conflict.studio ? "" : "Studio doesn't have it. ") + (conflict.disk ? "" : "The disk doesn't have it.");
+	const actions = el("div", { className: "actions" });
+	const body = el("div");
+
+	if (isFolder(conflict)) {
+		actions.append(button("Keep Studio", () => settle(conflict, "studio")), button("Keep disk", () => settle(conflict, "disk")));
+		body.append(el("p", { className: "dim", textContent: "An empty folder." }));
+	} else if (data.model) {
+		const disk = conflict.suggested === "disk";
+		actions.append(button("Keep Studio", () => settle(conflict, "studio"), !disk), button("Keep disk", () => settle(conflict, "disk"), disk));
+		body.append(el("h3", { textContent: "Instances" }));
+		body.append(data.model.length
+			? el("ul", { className: "tree" }, ...data.model.map(modelNode))
+			: el("p", { className: "dim", textContent: "The bytes differ, but no instance or property does." }));
+	} else {
+		const { texts, diff } = data;
+		if (texts.merged !== null) actions.append(button("Use the automatic merge", () => settle(conflict, "merged", { text: texts.merged }), true));
+		const disk = conflict.suggested === "disk";
+		actions.append(button("Keep Studio", () => settle(conflict, "studio")), button("Keep disk", () => settle(conflict, "disk"), disk));
+		if (conflict.studio && conflict.disk) {
+			actions.append(
+				button("Diff in VS Code", () => call(`api/conflicts/${conflict.id}/open-diff`, {}).catch((e) => alert(e.message))),
+				button("Merge in VS Code", () => call(`api/conflicts/${conflict.id}/open-merge`, {}).catch((e) => alert(e.message))),
+				button("Use the VS Code merge", () => settle(conflict, "mergeFile")),
+			);
+		}
+		const textSame = diff && !diff.includes("@@");
+		if (diff && !textSame) body.append(el("h3", { textContent: "Disk to Studio" }), diffLines(diff));
+		if (textSame) body.append(el("p", { className: "dim", textContent: "The text is the same on both sides." }));
+		if (texts.studioMeta !== null || texts.diskMeta !== null) {
+			body.append(
+				el("h3", { textContent: "Attributes and tags" }),
+				el("div", { className: "sides" },
+					el("div", {}, el("div", { className: "dim", textContent: "Studio" }), plain(texts.studioMeta ?? "(none)")),
+					el("div", {}, el("div", { className: "dim", textContent: "Disk" }), plain(texts.diskMeta ?? "(none)"))),
+			);
+		}
+		if (texts.merged !== null) body.append(el("h3", { textContent: "Automatic merge" }), plain(texts.merged));
+		else if (texts.mergedWithMarkers !== null) body.append(el("h3", { textContent: "The edits overlap" }), plain(texts.mergedWithMarkers));
+		if (!diff) body.append(el("h3", { textContent: conflict.studio ? "Studio" : "Disk" }), plain(texts.studio ?? texts.disk ?? ""));
+	}
+
+	detail.replaceChildren(
+		el("h2", { textContent: fullPath(conflict) }),
+		el("div", { className: "dim", textContent: `${conflict.reason}${/[.?!]$/.test(conflict.reason) ? "" : "."} ${sides}` }),
+		actions,
+		body,
+	);
+}
+
+function showHistory() {
+	const rows = [...state.history].reverse();
+	const detail = $("detail");
+	const list = rows.length
+		? el("table", {}, ...rows.map((h) => el("tr", {},
+			el("td", { textContent: new Date(h.at).toLocaleTimeString() }),
+			el("td", { textContent: h.direction === "toDisk" ? "Studio to disk" : "Disk to Studio" }),
+			el("td", { textContent: h.change }),
+			el("td", { textContent: h.key || "(root)" }))))
+		: el("div", { className: "empty", textContent: "Nothing has synced yet." });
+	const notes = state.warnings.map((w) => el("div", { className: "notice", textContent: w }));
+	detail.replaceChildren(
+		el("div", { className: "empty", textContent: "No conflicts." }),
+		...notes,
+		el("h3", { textContent: "Recent changes" }),
+		list,
+	);
+}
+
+async function refresh() {
+	state = await call("api/review");
+	$("status").textContent = state.connected ? `connected to ${state.place}` : "no Studio connected";
+
+	const list = $("list");
+	const items = visible();
+	list.replaceChildren();
+	if (items.length > 1) {
+		list.append(el("div", { className: "actions" },
+			button("Keep disk for all", () => settleAll("disk")),
+			button("Keep Studio for all", () => settleAll("studio"))));
+	}
+	let heading = null;
+	for (const c of items) {
+		if (c.studioRoot !== heading) {
+			heading = c.studioRoot;
+			list.append(el("h3", { textContent: heading }));
+		}
+		list.append(el("button", {
+			className: selected === c.id ? "on" : "",
+			onclick: () => { selected = c.id; shown = ""; refresh(); },
+		}, c.key || rootName(c), el("small", { textContent: c.reason })));
+	}
+	if (!items.length) list.append(el("div", { className: "dim", textContent: "Nothing to review." }));
+
+	const linked = decodeURIComponent(location.hash.slice(1));
+	if (linked && selected === null) selected = items.find((c) => c.key === linked)?.id ?? null;
+	if (!items.some((c) => c.id === selected)) selected = items[0]?.id ?? null;
+	const conflict = items.find((c) => c.id === selected);
+	const signature = conflict
+		? `${conflict.id}:${conflict.studio?.hash}:${conflict.disk?.hash}`
+		: `h:${state.history.length}:${state.history.at(-1)?.at}:${state.warnings.length}`;
+	if (signature !== shown) {
+		shown = signature;
+		if (conflict) await showConflict(conflict);
+		else showHistory();
+	}
+}
+
+refresh();
+setInterval(() => refresh().catch(() => { $("status").textContent = "Rojo isn't running, or it was started without twoway.json"; }), 1500);
+</script>
+</body>
+</html>
