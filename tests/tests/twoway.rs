@@ -49,7 +49,8 @@ fn find(dom: &WeakDom, path: &str) -> Option<(String, Option<String>)> {
     }
     let instance = dom.get_by_ref(current)?;
     let source = match instance.properties.get(&rbx_dom_weak::ustr("Source")) {
-        Some(rbx_dom_weak::types::Variant::String(text)) => Some(text.clone()),
+        // A checkout may turn the test files' line endings into CRLF.
+        Some(rbx_dom_weak::types::Variant::String(text)) => Some(text.replace("\r\n", "\n")),
         _ => None,
     };
     Some((instance.class.to_string(), source))
