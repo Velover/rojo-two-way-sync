@@ -11,6 +11,7 @@ local getProperty = require(script.Parent.getProperty)
 local Error = require(script.Parent.Error)
 local decodeValue = require(script.Parent.decodeValue)
 local trueEquals = require(script.Parent.trueEquals)
+local linkedProperties = require(script.Parent.linkedProperties)
 
 local function isEmpty(table)
 	return next(table) == nil
@@ -60,13 +61,19 @@ local function diff(instanceMap, virtualInstances, rootId)
 			changedClassName = virtualInstance.ClassName
 		end
 
+		-- The DataModel's name is the place's, which Studio doesn't save: renaming it after the
+		-- project would be asked again in every session and change nothing.
 		local changedName = nil
-		if virtualInstance.Name ~= instance.Name then
+		if virtualInstance.Name ~= instance.Name and instance.ClassName ~= "DataModel" then
 			changedName = virtualInstance.Name
 		end
 
 		local changedProperties = {}
 		for propertyName, virtualValue in pairs(virtualInstance.Properties) do
+			if linkedProperties.skip(propertyName, virtualInstance.Properties) then
+				continue
+			end
+
 			local getProperySuccess, existingValueOrErr = getProperty(instance, propertyName)
 
 			if getProperySuccess then

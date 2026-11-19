@@ -31,6 +31,9 @@ Making a new release? Simply add the new header with the version and date undern
 
 ## Unreleased
 
+* Fixed Rojo asking to change `TextWrapped` on every connect for a text object that has `TextScaled` on and `TextWrapped` off, and turning its `TextScaled` off when that change was accepted. Roblox turns `TextWrapped` on with `TextScaled` and `TextScaled` off with `TextWrapped`, so while `TextScaled` is on, Rojo now leaves `TextWrapped` alone.
+* Rojo no longer asks to rename the place (`game`) after the project on every connect. Studio doesn't save the place's name, so the rename never stuck.
+
 ## [7.7.1-twoway.1] (November 15th, 2026)
 
 * Releases from a fork no longer try to upload the plugin to Roblox, which only rojo-rbx/rojo has the secrets for.

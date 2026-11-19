@@ -16,6 +16,7 @@ local decodeValue = require(script.Parent.decodeValue)
 local reify = require(script.Parent.reify)
 local reifyInstance, applyDeferredRefs = reify.reifyInstance, reify.applyDeferredRefs
 local setProperty = require(script.Parent.setProperty)
+local linkedProperties = require(script.Parent.linkedProperties)
 
 local function applyPatch(instanceMap, patch)
 	-- Tracks any portions of the patch that could not be applied to the DOM.
@@ -200,6 +201,10 @@ local function applyPatch(instanceMap, patch)
 
 		if update.changedProperties ~= nil then
 			for propertyName, propertyValue in pairs(update.changedProperties) do
+				if linkedProperties.skipUpdate(propertyName, update.changedProperties, instance) then
+					continue
+				end
+
 				-- Because refs may refer to instances that we haven't constructed yet,
 				-- we defer applying any ref properties until all instances are created.
 				if next(propertyValue) == "Ref" then

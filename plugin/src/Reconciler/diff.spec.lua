@@ -112,6 +112,81 @@ return function()
 		expect(value).to.equal("Hello, world!")
 	end)
 
+	it("should not rename the DataModel", function()
+		local knownInstances = InstanceMap.new()
+		local virtualInstances = {
+			ROOT = {
+				ClassName = "DataModel",
+				Name = "Not The Place Name " .. game.Name,
+				Properties = {},
+				Children = {},
+				Metadata = {
+					ignoreUnknownInstances = true,
+				},
+			},
+		}
+
+		knownInstances:insert("ROOT", game)
+
+		local ok, patch = diff(knownInstances, virtualInstances, "ROOT")
+		knownInstances:stop()
+
+		assert(ok, tostring(patch))
+		assert(PatchSet.isEmpty(patch), "expected empty patch")
+	end)
+
+	it("should leave TextWrapped alone while TextScaled is on", function()
+		local knownInstances = InstanceMap.new()
+		local virtualInstances = {
+			ROOT = {
+				ClassName = "TextLabel",
+				Name = "Label",
+				Properties = {
+					TextScaled = { Bool = true },
+					TextWrapped = { Bool = false },
+				},
+				Children = {},
+			},
+		}
+
+		-- What Studio holds after a model with TextScaled on and TextWrapped off is applied.
+		local rootInstance = Instance.new("TextLabel")
+		rootInstance.Name = "Label"
+		rootInstance.TextScaled = true
+		expect(rootInstance.TextWrapped).to.equal(true)
+		knownInstances:insert("ROOT", rootInstance)
+
+		local ok, patch = diff(knownInstances, virtualInstances, "ROOT")
+
+		assert(ok, tostring(patch))
+		assert(PatchSet.isEmpty(patch), "expected empty patch")
+	end)
+
+	it("should still compare TextWrapped while TextScaled is off", function()
+		local knownInstances = InstanceMap.new()
+		local virtualInstances = {
+			ROOT = {
+				ClassName = "TextLabel",
+				Name = "Label",
+				Properties = {
+					TextScaled = { Bool = false },
+					TextWrapped = { Bool = true },
+				},
+				Children = {},
+			},
+		}
+
+		local rootInstance = Instance.new("TextLabel")
+		rootInstance.Name = "Label"
+		knownInstances:insert("ROOT", rootInstance)
+
+		local ok, patch = diff(knownInstances, virtualInstances, "ROOT")
+
+		assert(ok, tostring(patch))
+		expect(#patch.updated).to.equal(1)
+		expect(patch.updated[1].changedProperties.TextWrapped).to.be.ok()
+	end)
+
 	it("should generate an empty patch if no properties changed", function()
 		local knownInstances = InstanceMap.new()
 		local virtualInstances = {

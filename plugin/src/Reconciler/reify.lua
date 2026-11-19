@@ -6,6 +6,7 @@ local invariant = require(script.Parent.Parent.invariant)
 local PatchSet = require(script.Parent.Parent.PatchSet)
 local setProperty = require(script.Parent.setProperty)
 local decodeValue = require(script.Parent.decodeValue)
+local linkedProperties = require(script.Parent.linkedProperties)
 
 --[[
 	Add the given ID and all of its descendants in virtualInstances to the given
@@ -59,6 +60,10 @@ function reifyInstanceInner(unappliedPatch, deferredRefs, instanceMap, virtualIn
 	local unappliedProperties = {}
 
 	for propertyName, virtualValue in pairs(virtualInstance.Properties) do
+		if linkedProperties.skip(propertyName, virtualInstance.Properties) then
+			continue
+		end
+
 		-- Because refs may refer to instances that we haven't constructed yet,
 		-- we defer applying any ref properties until all instances are created.
 		if next(virtualValue) == "Ref" then

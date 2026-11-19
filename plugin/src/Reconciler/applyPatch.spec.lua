@@ -178,6 +178,48 @@ return function()
 		expect(value.Value).to.equal("WORLD")
 	end)
 
+	it("should not turn TextScaled off by turning TextWrapped off", function()
+		local label = Instance.new("TextLabel")
+		label.TextScaled = true
+
+		local instanceMap = InstanceMap.new()
+		instanceMap:insert("LABEL", label)
+
+		local patch = PatchSet.newEmpty()
+		table.insert(patch.updated, {
+			id = "LABEL",
+			changedProperties = {
+				TextWrapped = { Bool = false },
+			},
+		})
+
+		local unapplied = applyPatch(instanceMap, patch)
+		assert(PatchSet.isEmpty(unapplied), "expected remaining patch to be empty")
+		expect(label.TextScaled).to.equal(true)
+	end)
+
+	it("should turn TextWrapped off along with TextScaled", function()
+		local label = Instance.new("TextLabel")
+		label.TextScaled = true
+
+		local instanceMap = InstanceMap.new()
+		instanceMap:insert("LABEL", label)
+
+		local patch = PatchSet.newEmpty()
+		table.insert(patch.updated, {
+			id = "LABEL",
+			changedProperties = {
+				TextScaled = { Bool = false },
+				TextWrapped = { Bool = false },
+			},
+		})
+
+		local unapplied = applyPatch(instanceMap, patch)
+		assert(PatchSet.isEmpty(unapplied), "expected remaining patch to be empty")
+		expect(label.TextScaled).to.equal(false)
+		expect(label.TextWrapped).to.equal(false)
+	end)
+
 	it("should recreate instances when changedClassName is set, preserving children", function()
 		local root = Instance.new("Folder")
 		root.Name = "Initial Root Name"

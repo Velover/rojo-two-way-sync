@@ -54,6 +54,32 @@ return function()
 		assert(isEmpty(unappliedPatch.updated), "expected no updates")
 	end)
 
+	it("should keep TextScaled on when TextWrapped is off", function()
+		local virtualInstances = {
+			ROOT = {
+				ClassName = "TextLabel",
+				Name = "Label",
+				Properties = {
+					TextScaled = { Bool = true },
+					TextWrapped = { Bool = false },
+				},
+				Children = {},
+			},
+		}
+
+		local deferredRefs = {}
+		local instanceMap = InstanceMap.new()
+		local unappliedPatch = reifyInstance(deferredRefs, instanceMap, virtualInstances, "ROOT")
+
+		applyDeferredRefs(instanceMap, deferredRefs, unappliedPatch)
+
+		assert(PatchSet.isEmpty(unappliedPatch), "expected remaining patch to be empty")
+
+		local instance = instanceMap.fromIds["ROOT"]
+		expect(instance.TextScaled).to.equal(true)
+		expect(instance.TextWrapped).to.equal(true)
+	end)
+
 	it("should assign name and properties", function()
 		local virtualInstances = {
 			ROOT = {
