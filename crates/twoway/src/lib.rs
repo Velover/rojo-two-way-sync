@@ -2,7 +2,7 @@
 //!
 //! The library holds everything a host needs: the engine, the file layout, model files, `build`
 //! and `check`, and [`service::Service`], which answers the plugin's and the review page's
-//! requests. The Rojo fork (github.com/Velover/rojo-two-way-sync) mounts it next to Rojo's API.
+//! requests. The Rojo fork (github.com/velover-rbxts-packages/rojo-two-way-sync) mounts it next to Rojo's API.
 
 pub mod check;
 pub mod config;
