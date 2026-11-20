@@ -752,15 +752,15 @@ mod test {
         let conflict = json!({
             "id": 3,
             "studioRoot": "ReplicatedStorage/GameData",
-            "key": "Diving",
+            "key": "Inventory",
             "reason": "both changed",
             "suggested": null,
             "studio": { "kind": "script", "hash": "aaa" },
             "disk": null,
-            "diskPath": "StudioSynced/GameData/Diving.luau",
+            "diskPath": "StudioSynced/GameData/Inventory.luau",
         });
         let summary = summarize(conflict);
-        assert_eq!(summary["path"], "ReplicatedStorage/GameData/Diving");
+        assert_eq!(summary["path"], "ReplicatedStorage/GameData/Inventory");
         assert_eq!(summary["token"], "aaa:none");
         assert_eq!(summary["disk"], Value::Null);
     }
@@ -770,12 +770,15 @@ mod test {
         let entry = HistoryEntry {
             at: 0,
             mapping: "ReplicatedStorage/GameData|StudioSynced/GameData".into(),
-            key: "Diving".into(),
+            key: "Inventory".into(),
             direction: "toDisk".into(),
             change: "update".into(),
             from: None,
             to: None,
         };
-        assert_eq!(instance_path(&entry), "ReplicatedStorage/GameData/Diving");
+        assert_eq!(
+            instance_path(&entry),
+            "ReplicatedStorage/GameData/Inventory"
+        );
     }
 }

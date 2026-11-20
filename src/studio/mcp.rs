@@ -282,9 +282,9 @@ mod test {
 
     #[test]
     fn a_window_name_gives_the_place() {
-        let published = window("Dive In (placeId: 123456)");
+        let published = window("My Place (placeId: 123456)");
         assert_eq!(published.place_id(), Some(123456));
-        assert_eq!(published.place_name(), Some("Dive In"));
+        assert_eq!(published.place_name(), Some("My Place"));
         assert_eq!(published.file_name(), None);
 
         let local = window("MainPlace.rbxl");

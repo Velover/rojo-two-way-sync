@@ -87,8 +87,8 @@ rojo twoway conflicts                     # what waits, each with a token
 rojo twoway show 3                        # both sides, the last agreed version, a diff
 rojo twoway resolve 3 --keep disk --token <token from show>
 rojo twoway resolve 3 --merged merged.luau --token <token>
-rojo twoway history --path GameData/Diving --limit 10
-rojo twoway restore 8092293e32 StudioSynced/GameData/Diving.luau
+rojo twoway history --path GameData/Inventory --limit 10
+rojo twoway restore 8092293e32 StudioSynced/GameData/Inventory.luau
 ```
 
 - Conflicts only exist while `rojo serve` runs, so `status`, `conflicts`, `show` and `resolve` ask
@@ -105,7 +105,7 @@ test windows, and a place someone else has open.
 
 ```sh
 rojo studio list                                   # the open windows: id, place, file
-rojo studio push --studio "Dive In"                # Rojo's trees and the two-way ones
+rojo studio push --studio "My Place"               # Rojo's trees and the two-way ones
 rojo studio push --studio test.rbxl --only rojo    # or --only twoway
 rojo studio push --studio test.rbxl --dry-run      # what would change; changes nothing
 rojo studio push --studio test.rbxl --resolve "ReplicatedStorage/Data/Config=disk"

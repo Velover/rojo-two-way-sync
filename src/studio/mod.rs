@@ -755,12 +755,12 @@ mod test {
     #[test]
     fn a_window_is_picked_by_id_name_place_or_part() {
         let windows = [
-            window("a", Some("Dive In (placeId: 111)")),
+            window("a", Some("My Place (placeId: 111)")),
             window("b", Some("MainPlace.rbxl")),
             window("c", None),
         ];
         assert_eq!(pick_window(&windows, Some("a")).unwrap().id, "a");
-        assert_eq!(pick_window(&windows, Some("Dive In")).unwrap().id, "a");
+        assert_eq!(pick_window(&windows, Some("My Place")).unwrap().id, "a");
         assert_eq!(pick_window(&windows, Some("111")).unwrap().id, "a");
         assert_eq!(pick_window(&windows, Some("mainplace")).unwrap().id, "b");
         assert!(pick_window(&windows, None).is_err(), "two named windows");
